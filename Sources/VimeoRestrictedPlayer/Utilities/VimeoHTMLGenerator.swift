@@ -80,7 +80,6 @@ internal class VimeoHTMLGenerator {
                 var lastValidTime = 0;
                 var restrictionCheckInterval;
                 var restrictionCorrectionTimeout;
-                var lastRestrictionTime = -1;
                 var SEEK_TOLERANCE = \(seekTolerance);
                 var actualMaxWatchedPosition = \(maxAllowedSeek);
                 var pendingResumeAfterAlert = false;
@@ -186,18 +185,11 @@ internal class VimeoHTMLGenerator {
                         return;
                     }
                     
-                    if (violationTime <= maxAllowedSeek + 0.5) {
+                     if (violationTime <= maxAllowedSeek + SEEK_TOLERANCE) {
                         console.log('[VimeoRestrictedPlayer] Within tolerance, ignoring');
                         return;
                     }
-                    
-                    var currentTimeRounded = Math.floor(violationTime);
-                    if (Math.abs(currentTimeRounded - lastRestrictionTime) < 2) {
-                        console.log('[VimeoRestrictedPlayer] Recent restriction already applied');
-                        return;
-                    }
-                    
-                    lastRestrictionTime = currentTimeRounded;
+                   
                     isEnforcingRestriction = true;
                     console.log('[VimeoRestrictedPlayer] Enforcing restriction for time:', violationTime);
                     
@@ -258,7 +250,7 @@ internal class VimeoHTMLGenerator {
                     isUserSeeking = true;
                     var seekTime = data.seconds;
                     
-                    if (seekRestrictionEnabled && !isCompleted && seekTime > maxAllowedSeek + 0.5) {
+                    if (seekRestrictionEnabled && !isCompleted && seekTime > maxAllowedSeek + SEEK_TOLERANCE) {
                         enforceRestrictionImmediate(seekTime);
                     }
                 });
@@ -277,7 +269,7 @@ internal class VimeoHTMLGenerator {
                     
                     var currentSeekTime = data.seconds;
                     
-                    if (seekRestrictionEnabled && !isCompleted && currentSeekTime > maxAllowedSeek + 0.5) {
+                    if (seekRestrictionEnabled && !isCompleted && currentSeekTime > maxAllowedSeek + SEEK_TOLERANCE) {
                         enforceRestrictionImmediate(currentSeekTime);
                     }
                 });
@@ -504,7 +496,7 @@ internal class VimeoHTMLGenerator {
                         restrictionCorrectionTimeout = null;
                     }
                     
-                    lastRestrictionTime = -1;
+
                     isEnforcingRestriction = false;
                     pendingResumeAfterAlert = false;
                     isVideoReady = false;
