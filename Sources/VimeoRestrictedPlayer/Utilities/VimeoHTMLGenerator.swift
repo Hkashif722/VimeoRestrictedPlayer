@@ -23,7 +23,6 @@ internal class VimeoHTMLGenerator {
         let isCompleted = configuration.isCompleted
         let videoTitle = configuration.videoTitle ?? "Video"
         let maxAllowedSeek = max(configuration.lastWatchedDuration, 0)
-        let seekRestrictionEnabled = configuration.seekRestriction.enabled && !configuration.allowsFullSeek
         let seekTolerance = configuration.seekRestriction.seekTolerance
         
         return """
@@ -70,7 +69,6 @@ internal class VimeoHTMLGenerator {
                 var isVideoReady = false;
                 var maxAllowedSeek = \(maxAllowedSeek);
                 var isCompleted = \(isCompleted ? "true" : "false");
-                var seekRestrictionEnabled = \(seekRestrictionEnabled ? "true" : "false");
                 var lastWatchedTime = \(lastWatched);
                 var currentTime = 0;
                 var duration = 0;
@@ -85,6 +83,11 @@ internal class VimeoHTMLGenerator {
                 var actualMaxWatchedPosition = \(maxAllowedSeek);
                 var pendingResumeAfterAlert = false;
                 var hasHandledInitialBookmark = false;
+                
+                // Helper function to check if restrictions should be applied
+                function shouldApplyRestrictions() {
+                    return isCompleted !== true && isCompleted !== 'true';
+                }
                 
                 // Player ready event
                 player.ready().then(function() {
@@ -105,8 +108,8 @@ internal class VimeoHTMLGenerator {
                             shouldShowResumeDialog: lastWatchedTime > \(configuration.resumeOptions.minimumWatchedForResume)
                         });
                         
-                        // Start monitoring if restrictions are enabled
-                        if (seekRestrictionEnabled && !isCompleted) {
+                        // Start monitoring if video is not completed
+                        if (shouldApplyRestrictions()) {
                             startRestrictionMonitoring();
                         }
                         
@@ -121,7 +124,7 @@ internal class VimeoHTMLGenerator {
                             shouldShowResumeDialog: lastWatchedTime > \(configuration.resumeOptions.minimumWatchedForResume)
                         });
                         
-                        if (seekRestrictionEnabled && !isCompleted) {
+                        if (shouldApplyRestrictions()) {
                             startRestrictionMonitoring();
                         }
                     });
@@ -134,7 +137,7 @@ internal class VimeoHTMLGenerator {
                     }
                     
                     restrictionCheckInterval = setInterval(function() {
-                        if (isVideoReady && !isEnforcingRestriction && seekRestrictionEnabled && !isCompleted) {
+                        if (isVideoReady && !isEnforcingRestriction && shouldApplyRestrictions()) {
                             player.getCurrentTime().then(function(time) {
                                 if (time > maxAllowedSeek + SEEK_TOLERANCE) {
                                     console.log('[VimeoRestrictedPlayer] Restriction violation detected:', time, 'max:', maxAllowedSeek);
@@ -152,7 +155,7 @@ internal class VimeoHTMLGenerator {
                     currentTime = data.seconds;
                     
                     // Continuous restriction check
-                    if (!isEnforcingRestriction && isVideoReady && seekRestrictionEnabled && !isCompleted) {
+                    if (!isEnforcingRestriction && isVideoReady && shouldApplyRestrictions()) {
                         if (currentTime > maxAllowedSeek + SEEK_TOLERANCE) {
                             console.log('[VimeoRestrictedPlayer] Restriction in timeupdate:', currentTime, 'max:', maxAllowedSeek);
                             enforceRestrictionImmediate(currentTime);
@@ -161,7 +164,7 @@ internal class VimeoHTMLGenerator {
                     }
                     
                     // Update max allowed seek position
-                    if (!isCompleted && !isEnforcingRestriction && !isUserSeeking) {
+                    if (shouldApplyRestrictions() && !isEnforcingRestriction && !isUserSeeking) {
                         if (currentTime > actualMaxWatchedPosition) {
                             actualMaxWatchedPosition = currentTime;
                             maxAllowedSeek = currentTime;
@@ -182,7 +185,7 @@ internal class VimeoHTMLGenerator {
                 
                 // Restriction enforcement
                 function enforceRestrictionImmediate(violationTime) {
-                    if (isEnforcingRestriction || !seekRestrictionEnabled || isCompleted) {
+                    if (isEnforcingRestriction || !shouldApplyRestrictions()) {
                         return;
                     }
                     
@@ -258,7 +261,7 @@ internal class VimeoHTMLGenerator {
                     isUserSeeking = true;
                     var seekTime = data.seconds;
                     
-                    if (seekRestrictionEnabled && !isCompleted && seekTime > maxAllowedSeek + 0.5) {
+                    if (shouldApplyRestrictions() && seekTime > maxAllowedSeek + 0.5) {
                         enforceRestrictionImmediate(seekTime);
                     }
                 });
@@ -277,7 +280,7 @@ internal class VimeoHTMLGenerator {
                     
                     var currentSeekTime = data.seconds;
                     
-                    if (seekRestrictionEnabled && !isCompleted && currentSeekTime > maxAllowedSeek + 0.5) {
+                    if (shouldApplyRestrictions() && currentSeekTime > maxAllowedSeek + 0.5) {
                         enforceRestrictionImmediate(currentSeekTime);
                     }
                 });
@@ -351,7 +354,7 @@ internal class VimeoHTMLGenerator {
                     var targetTime = time;
                     
                     // Only restrict if trying to seek beyond the maximum allowed position
-                    if (seekRestrictionEnabled && !isCompleted && time > maxAllowedSeek + 0.5 && time > lastWatchedTime + 0.5) {
+                    if (shouldApplyRestrictions() && time > maxAllowedSeek + 0.5 && time > lastWatchedTime + 0.5) {
                         console.log('[VimeoRestrictedPlayer] Seek beyond allowed, using max:', maxAllowedSeek);
                         targetTime = maxAllowedSeek;
                     }
