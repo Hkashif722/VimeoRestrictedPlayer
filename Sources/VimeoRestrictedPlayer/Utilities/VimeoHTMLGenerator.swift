@@ -8,7 +8,7 @@
 import Foundation
 
 /// Generates HTML content for Vimeo player
-internal class generateHTML  {
+internal class VimeoHTMLGenerator  {
     
     private let configuration: VimeoPlayerConfiguration
     
@@ -17,7 +17,7 @@ internal class generateHTML  {
     }
     
     // MARK: - Generate Vimeo HTML with Fixed Bookmark Support
-    private func generateVimeoHTML() -> String {
+    private func generateHTML() -> String {
         let lastWatched = configuration.lastWatchedDuration
         let autoplay = configuration.autoplay ? "true" : "false"
         let allRestriction = configuration.isCompleted || configuration.allowsFullSeek
