@@ -12,10 +12,10 @@ A powerful iOS library for embedding Vimeo videos with playback restrictions, pr
 - 🚫 **Seek Restrictions** - Prevent users from skipping ahead beyond watched content
 - 📊 **Progress Tracking** - Automatic tracking of watched duration
 - ⏯️ **Resume Functionality** - Continue from where users left off
-- 🎨 **Customizable UI** - Configurable player appearance and controls
+- 🎨 **Customizable UI** - Configurable player appearance and controls [Comming Soon ⏳]
 - 📱 **Native iOS Experience** - Built with WKWebView for optimal performance
 - 🔄 **Completion Callbacks** - Get notified of playback events
-- 🛡️ **Error Handling** - Comprehensive error management
+- 🛡️ **Error Handling** - Comprehensive error management [Comming Soon ⏳]
 
 ## Installation
 
@@ -183,11 +183,11 @@ VimeoRestrictedPlayer/
 │   └── VimeoRestrictedPlayer/
 │       ├── Core/
 │       │   ├── VimeoRestrictedPlayerViewController.swift
-│       │   └── VimeoPlayerWebViewBridge.swift
+│       │   └── VimeoPlayerWebViewBridge.swift [TODO]
 │       ├── Models/
 │       │   ├── VimeoPlayerConfiguration.swift
-│       │   ├── VimeoPlayerState.swift
-│       │   └── VimeoPlayerError.swift
+│       │   ├── VimeoPlayerState.swift [TODO]
+│       │   └── VimeoPlayerError.swift [TODO]
 │       ├── Protocols/
 │       │   └── VimeoPlayerDelegate.swift
 │       ├── Utilities/
@@ -195,8 +195,8 @@ VimeoRestrictedPlayer/
 │       │   ├── TimeFormatter.swift
 │       │   └── VimeoURLParser.swift
 │       └── UI/
-│           ├── VimeoPlayerTheme.swift
-│           └── VimeoPlayerControls.swift
+│           ├── VimeoPlayerTheme.swift [TODO]
+│           └── VimeoPlayerControls.swift [TODO]
 ```
 
 ### Core Components
