@@ -96,6 +96,10 @@ internal class VimeoHTMLGenerator {
                         duration = videoDuration;
                         console.log('[VimeoRestrictedPlayer] Duration:', duration);
                         
+                        // Clamp max allowed seek to duration
+                        maxAllowedSeek = Math.min(maxAllowedSeek, duration);
+                        actualMaxWatchedPosition = Math.min(actualMaxWatchedPosition, duration);
+                        
                         // Send ready message
                         window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                             type: 'ready',
@@ -144,7 +148,7 @@ internal class VimeoHTMLGenerator {
                                 console.log('[VimeoRestrictedPlayer] Error in monitoring:', error);
                             });
                         }
-                    }, 500);
+                    }, 100); // Increased frequency to 100ms
                 }
                 
                 // Time update event
@@ -186,18 +190,11 @@ internal class VimeoHTMLGenerator {
                         return;
                     }
                     
-                    if (violationTime <= maxAllowedSeek + 0.5) {
+                    if (violationTime <= maxAllowedSeek + SEEK_TOLERANCE) {
                         console.log('[VimeoRestrictedPlayer] Within tolerance, ignoring');
                         return;
                     }
                     
-                    var currentTimeRounded = Math.floor(violationTime);
-                    if (Math.abs(currentTimeRounded - lastRestrictionTime) < 2) {
-                        console.log('[VimeoRestrictedPlayer] Recent restriction already applied');
-                        return;
-                    }
-                    
-                    lastRestrictionTime = currentTimeRounded;
                     isEnforcingRestriction = true;
                     console.log('[VimeoRestrictedPlayer] Enforcing restriction for time:', violationTime);
                     
@@ -210,10 +207,12 @@ internal class VimeoHTMLGenerator {
                         pendingResumeAfterAlert = wasPlayingBeforeSeek;
                         
                         player.pause().then(function() {
-                            player.setCurrentTime(maxAllowedSeek).then(function() {
-                                console.log('[VimeoRestrictedPlayer] Corrected to:', maxAllowedSeek);
+                            var targetTime = maxAllowedSeek;
+                            player.setCurrentTime(targetTime).then(function() {
+                                console.log('[VimeoRestrictedPlayer] Corrected to:', targetTime);
                                 
-                                setTimeout(function() {
+                                // Verify after correction
+                                restrictionCorrectionTimeout = setTimeout(function() {
                                     player.getCurrentTime().then(function(verifyTime) {
                                         console.log('[VimeoRestrictedPlayer] Position verified:', verifyTime);
                                         
@@ -231,7 +230,7 @@ internal class VimeoHTMLGenerator {
                                         console.log('[VimeoRestrictedPlayer] Error verifying position:', error);
                                         isEnforcingRestriction = false;
                                     });
-                                }, 100);
+                                }, 200);
                                 
                             }).catch(function(error) {
                                 console.log('[VimeoRestrictedPlayer] Error setting time:', error);
@@ -258,7 +257,7 @@ internal class VimeoHTMLGenerator {
                     isUserSeeking = true;
                     var seekTime = data.seconds;
                     
-                    if (seekRestrictionEnabled && !isCompleted && seekTime > maxAllowedSeek + 0.5) {
+                    if (seekRestrictionEnabled && !isCompleted && seekTime > maxAllowedSeek + SEEK_TOLERANCE) {
                         enforceRestrictionImmediate(seekTime);
                     }
                 });
@@ -277,7 +276,7 @@ internal class VimeoHTMLGenerator {
                     
                     var currentSeekTime = data.seconds;
                     
-                    if (seekRestrictionEnabled && !isCompleted && currentSeekTime > maxAllowedSeek + 0.5) {
+                    if (seekRestrictionEnabled && !isCompleted && currentSeekTime > maxAllowedSeek + SEEK_TOLERANCE) {
                         enforceRestrictionImmediate(currentSeekTime);
                     }
                 });
@@ -351,9 +350,14 @@ internal class VimeoHTMLGenerator {
                     var targetTime = time;
                     
                     // Only restrict if trying to seek beyond the maximum allowed position
-                    if (seekRestrictionEnabled && !isCompleted && time > maxAllowedSeek + 0.5 && time > lastWatchedTime + 0.5) {
+                    if (seekRestrictionEnabled && !isCompleted && time > maxAllowedSeek + SEEK_TOLERANCE && time > lastWatchedTime + SEEK_TOLERANCE) {
                         console.log('[VimeoRestrictedPlayer] Seek beyond allowed, using max:', maxAllowedSeek);
                         targetTime = maxAllowedSeek;
+                    }
+                    
+                    // Clamp to duration if known
+                    if (duration > 0 && targetTime > duration) {
+                        targetTime = duration;
                     }
                     
                     console.log('[VimeoRestrictedPlayer] Setting time to:', targetTime);
@@ -419,6 +423,10 @@ internal class VimeoHTMLGenerator {
                 // Update max allowed seek
                 function updateMaxAllowedSeek(newMax) {
                     console.log('[VimeoRestrictedPlayer] Updating max allowed seek to:', newMax);
+                    // If duration is known, clamp newMax to duration
+                    if (duration > 0) {
+                        newMax = Math.min(newMax, duration);
+                    }
                     if (newMax > maxAllowedSeek) {
                         maxAllowedSeek = newMax;
                         actualMaxWatchedPosition = newMax;
@@ -437,7 +445,8 @@ internal class VimeoHTMLGenerator {
                             isEnforcing: isEnforcingRestriction,
                             lastValid: lastValidTime,
                             pendingResume: pendingResumeAfterAlert,
-                            lastWatchedTime: lastWatchedTime
+                            lastWatchedTime: lastWatchedTime,
+                            duration: duration
                         };
                     }
                     return null;
@@ -454,7 +463,7 @@ internal class VimeoHTMLGenerator {
                     player.getCurrentTime().then(function(time) {
                         console.log('[VimeoRestrictedPlayer] Current position:', time, 'Max allowed:', maxAllowedSeek);
                         
-                        if (time > maxAllowedSeek + 0.5) {
+                        if (time > maxAllowedSeek + SEEK_TOLERANCE) {
                             player.setCurrentTime(maxAllowedSeek).then(function() {
                                 console.log('[VimeoRestrictedPlayer] Position corrected');
                                 
