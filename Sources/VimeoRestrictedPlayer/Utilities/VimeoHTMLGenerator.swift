@@ -51,6 +51,19 @@ internal class VimeoHTMLGenerator {
                     height: 100%;
                     border: none;
                 }
+                /* Overlay to intercept double-tap events */
+                .tap-interceptor {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 10;
+                    pointer-events: none;
+                }
+                .tap-interceptor.active {
+                    pointer-events: auto;
+                }
             </style>
         </head>
         <body>
@@ -60,12 +73,14 @@ internal class VimeoHTMLGenerator {
                       frameborder="0" 
                       allow="autoplay; picture-in-picture">
               </iframe>
+              <div id="tap-interceptor" class="tap-interceptor"></div>
             </div>
             
             <script src="https://player.vimeo.com/api/player.js"></script>
             <script>
                 var iframe = document.querySelector('#vimeo-player');
                 var player = new Vimeo.Player(iframe);
+                var tapInterceptor = document.querySelector('#tap-interceptor');
                 var isVideoReady = false;
                 var maxAllowedSeek = \(maxAllowedSeek);
                 var isCompleted = \(isCompleted ? "true" : "false");
@@ -87,15 +102,25 @@ internal class VimeoHTMLGenerator {
                 var enforcementQueue = [];
                 var isProcessingEnforcement = false;
                 var lastEnforcementTime = 0;
-                var ENFORCEMENT_DEBOUNCE = 100; // ms
+                var ENFORCEMENT_DEBOUNCE = 50; // Reduced from 100ms for faster response
+                var RAPID_SEEK_ENFORCEMENT_DEBOUNCE = 10; // Even faster for rapid seeks
                 
                 // Seek event tracking
                 var seekEventTimestamps = [];
                 var SEEK_EVENT_WINDOW = 1000; // Track seeks within 1 second
                 
+                // Double-tap detection
+                var lastTapTime = 0;
+                var tapTimeout = null;
+                var DOUBLE_TAP_THRESHOLD = 300; // ms
+                
                 // State synchronization
                 var stateVersion = 0;
                 var pendingStateUpdates = {};
+                
+                // Position tracking for rapid changes
+                var lastKnownPosition = 0;
+                var positionCheckInterval;
                 
                 // Player ready event
                 player.ready().then(function() {
@@ -119,6 +144,8 @@ internal class VimeoHTMLGenerator {
                         // Start monitoring if restrictions are enabled
                         if (seekRestrictionEnabled && !isCompleted) {
                             startRestrictionMonitoring();
+                            startPositionTracking();
+                            enableTapInterception();
                         }
                         
                     }).catch(function(error) {
@@ -134,9 +161,130 @@ internal class VimeoHTMLGenerator {
                         
                         if (seekRestrictionEnabled && !isCompleted) {
                             startRestrictionMonitoring();
+                            startPositionTracking();
+                            enableTapInterception();
                         }
                     });
                 });
+                
+                // Enable tap interception for seek restriction
+                function enableTapInterception() {
+                    if (!seekRestrictionEnabled || isCompleted) return;
+                    
+                    tapInterceptor.classList.add('active');
+                    
+                    // Intercept touch events
+                    tapInterceptor.addEventListener('touchstart', handleTouchStart, { passive: false });
+                    tapInterceptor.addEventListener('click', handleClick, { passive: false });
+                }
+                
+                // Handle touch start for double-tap detection
+                function handleTouchStart(e) {
+                    if (!seekRestrictionEnabled || isCompleted) {
+                        // Pass through the event
+                        tapInterceptor.classList.remove('active');
+                        setTimeout(function() {
+                            tapInterceptor.classList.add('active');
+                        }, 100);
+                        return;
+                    }
+                    
+                    var currentTapTime = Date.now();
+                    var tapDelta = currentTapTime - lastTapTime;
+                    
+                    // Check if this is a double-tap
+                    if (tapDelta < DOUBLE_TAP_THRESHOLD && tapDelta > 0) {
+                        // Double-tap detected
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        // Check which side was tapped
+                        var tapX = e.touches[0].clientX;
+                        var screenWidth = window.innerWidth;
+                        
+                        if (tapX > screenWidth * 0.6) {
+                            // Right side - would normally fast forward
+                            console.log('[VimeoRestrictedPlayer] Double-tap forward blocked');
+                            
+                            // Check current position and enforce if needed
+                            player.getCurrentTime().then(function(time) {
+                                if (time > maxAllowedSeek + SEEK_TOLERANCE) {
+                                    queueEnforcement({
+                                        time: time,
+                                        source: 'double-tap-forward',
+                                        timestamp: Date.now()
+                                    });
+                                }
+                            });
+                        } else if (tapX < screenWidth * 0.4) {
+                            // Left side - rewind is usually allowed
+                            // But still check if trying to go beyond allowed
+                            temporarilyDisableInterception();
+                        }
+                        
+                        clearTimeout(tapTimeout);
+                        lastTapTime = 0;
+                    } else {
+                        // First tap
+                        lastTapTime = currentTapTime;
+                        
+                        // Set timeout to reset tap detection
+                        clearTimeout(tapTimeout);
+                        tapTimeout = setTimeout(function() {
+                            lastTapTime = 0;
+                            // Single tap - allow it through
+                            temporarilyDisableInterception();
+                        }, DOUBLE_TAP_THRESHOLD);
+                    }
+                }
+                
+                // Handle click events (for desktop)
+                function handleClick(e) {
+                    // Similar logic for desktop double-clicks
+                    if (!seekRestrictionEnabled || isCompleted) {
+                        temporarilyDisableInterception();
+                        return;
+                    }
+                }
+                
+                // Temporarily disable interception to allow legitimate interactions
+                function temporarilyDisableInterception() {
+                    tapInterceptor.classList.remove('active');
+                    setTimeout(function() {
+                        if (seekRestrictionEnabled && !isCompleted) {
+                            tapInterceptor.classList.add('active');
+                        }
+                    }, 100);
+                }
+                
+                // Enhanced position tracking for rapid changes
+                function startPositionTracking() {
+                    if (positionCheckInterval) {
+                        clearInterval(positionCheckInterval);
+                    }
+                    
+                    positionCheckInterval = setInterval(function() {
+                        if (isVideoReady && !isProcessingEnforcement && seekRestrictionEnabled && !isCompleted) {
+                            player.getCurrentTime().then(function(time) {
+                                // Check for sudden jumps
+                                var positionJump = Math.abs(time - lastKnownPosition);
+                                
+                                // If position jumped more than 2 seconds, it's likely a seek
+                                if (positionJump > 2 && time > maxAllowedSeek + SEEK_TOLERANCE) {
+                                    console.log('[VimeoRestrictedPlayer] Rapid position change detected:', lastKnownPosition, '->', time);
+                                    trackSeekEvent();
+                                    queueEnforcement({
+                                        time: time,
+                                        source: 'position-jump',
+                                        timestamp: Date.now()
+                                    });
+                                }
+                                
+                                lastKnownPosition = time;
+                            });
+                        }
+                    }, 50); // Check every 50ms for rapid changes
+                }
                 
                 // Enhanced monitoring with debouncing
                 function startRestrictionMonitoring() {
@@ -149,8 +297,11 @@ internal class VimeoHTMLGenerator {
                             player.getCurrentTime().then(function(time) {
                                 var now = Date.now();
                                 
-                                // Skip if we recently enforced
-                                if (now - lastEnforcementTime < ENFORCEMENT_DEBOUNCE) {
+                                // Use appropriate debounce based on rapid seeking
+                                var debounceTime = isRapidSeeking() ? RAPID_SEEK_ENFORCEMENT_DEBOUNCE : ENFORCEMENT_DEBOUNCE;
+                                
+                                // Skip if we recently enforced (unless rapid seeking)
+                                if (!isRapidSeeking() && now - lastEnforcementTime < debounceTime) {
                                     return;
                                 }
                                 
@@ -160,18 +311,27 @@ internal class VimeoHTMLGenerator {
                                     queueEnforcement({
                                         time: time,
                                         source: 'monitoring',
-                                        timestamp: now
+                                        timestamp: now,
+                                        priority: isRapidSeeking() ? 'high' : 'normal'
                                     });
                                 }
                             }).catch(function(error) {
                                 console.log('[VimeoRestrictedPlayer] Error in monitoring:', error);
                             });
                         }
-                    }, 250); // Reduced interval for better responsiveness
+                    }, 100); // Reduced from 250ms for better responsiveness
                 }
                 
                 // Queue enforcement to prevent race conditions
                 function queueEnforcement(violation) {
+                    // For high priority (rapid seeking), clear queue and process immediately
+                    if (violation.priority === 'high' || violation.source === 'double-tap-forward') {
+                        console.log('[VimeoRestrictedPlayer] High priority enforcement');
+                        enforcementQueue = [violation]; // Clear and replace queue
+                        processEnforcementQueue();
+                        return;
+                    }
+                    
                     // Check if we already have a similar violation queued
                     var isDuplicate = enforcementQueue.some(function(v) {
                         return Math.abs(v.time - violation.time) < 0.5 && 
@@ -192,6 +352,12 @@ internal class VimeoHTMLGenerator {
                     
                     isProcessingEnforcement = true;
                     var violation = enforcementQueue.shift();
+                    
+                    // Immediate enforcement for high priority
+                    if (violation.priority === 'high' || violation.source === 'double-tap-forward') {
+                        enforceRestrictionSafe(violation);
+                        return;
+                    }
                     
                     // Double-check the violation is still valid
                     player.getCurrentTime().then(function(currentPos) {
@@ -227,6 +393,40 @@ internal class VimeoHTMLGenerator {
                     // Track rapid seeks
                     trackSeekEvent();
                     
+                    // For rapid seeks or double-tap, enforce immediately without checking pause state
+                    if (violation.priority === 'high' || violation.source === 'double-tap-forward' || isRapidSeeking()) {
+                        // Immediate enforcement
+                        player.pause().then(function() {
+                            return player.setCurrentTime(maxAllowedSeek);
+                        }).then(function() {
+                            console.log('[VimeoRestrictedPlayer] Rapid enforcement completed');
+                            
+                            window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
+                                type: 'seekRestricted',
+                                attemptedTime: violation.time,
+                                maxAllowed: maxAllowedSeek,
+                                wasPlaying: true,
+                                actualPosition: maxAllowedSeek,
+                                isRapidSeeking: true,
+                                source: violation.source
+                            });
+                            
+                            isProcessingEnforcement = false;
+                            isEnforcingRestriction = false;
+                            
+                            // Process next in queue after a short delay
+                            if (enforcementQueue.length > 0) {
+                                setTimeout(processEnforcementQueue, 20);
+                            }
+                        }).catch(function(error) {
+                            console.log('[VimeoRestrictedPlayer] Error in rapid enforcement:', error);
+                            isProcessingEnforcement = false;
+                        });
+                        
+                        return;
+                    }
+                    
+                    // Normal enforcement flow
                     player.getPaused().then(function(paused) {
                         wasPlayingBeforeSeek = !paused;
                         pendingResumeAfterAlert = wasPlayingBeforeSeek && !isRapidSeeking();
@@ -256,7 +456,8 @@ internal class VimeoHTMLGenerator {
                                 maxAllowed: maxAllowedSeek,
                                 wasPlaying: wasPlayingBeforeSeek,
                                 actualPosition: verifyTime,
-                                isRapidSeeking: isRapidSeeking()
+                                isRapidSeeking: isRapidSeeking(),
+                                source: violation.source
                             });
                             
                             isProcessingEnforcement = false;
@@ -295,7 +496,7 @@ internal class VimeoHTMLGenerator {
                 
                 // Check if user is rapidly seeking
                 function isRapidSeeking() {
-                    return seekEventTimestamps.length > 3;
+                    return seekEventTimestamps.length > 2; // Reduced from 3 for quicker detection
                 }
                 
                 // Time update event with debouncing
@@ -304,8 +505,9 @@ internal class VimeoHTMLGenerator {
                     currentTime = data.seconds;
                     var now = Date.now();
                     
-                    // Debounce time updates
-                    if (now - lastTimeUpdate < 50) {
+                    // Debounce time updates (reduced for rapid seeks)
+                    var debounceTime = isRapidSeeking() ? 20 : 50;
+                    if (now - lastTimeUpdate < debounceTime) {
                         return;
                     }
                     lastTimeUpdate = now;
@@ -317,7 +519,8 @@ internal class VimeoHTMLGenerator {
                             queueEnforcement({
                                 time: currentTime,
                                 source: 'timeupdate',
-                                timestamp: now
+                                timestamp: now,
+                                priority: isRapidSeeking() ? 'high' : 'normal'
                             });
                             return;
                         }
@@ -359,7 +562,8 @@ internal class VimeoHTMLGenerator {
                         queueEnforcement({
                             time: seekTime,
                             source: 'seeking',
-                            timestamp: Date.now()
+                            timestamp: Date.now(),
+                            priority: isRapidSeeking() ? 'high' : 'normal'
                         });
                     }
                 });
@@ -368,9 +572,10 @@ internal class VimeoHTMLGenerator {
                 player.on('seeked', function(data) {
                     console.log('[VimeoRestrictedPlayer] Seeked event:', data.seconds);
                     
+                    // Reduced timeout for faster response
                     setTimeout(function() {
                         isUserSeeking = false;
-                    }, 150);
+                    }, 50);
                     
                     if (isProcessingEnforcement) {
                         return;
@@ -382,7 +587,8 @@ internal class VimeoHTMLGenerator {
                         queueEnforcement({
                             time: currentSeekTime,
                             source: 'seeked',
-                            timestamp: Date.now()
+                            timestamp: Date.now(),
+                            priority: isRapidSeeking() ? 'high' : 'normal'
                         });
                     }
                 });
@@ -404,6 +610,9 @@ internal class VimeoHTMLGenerator {
                     // Clear any pending enforcements
                     enforcementQueue = [];
                     isProcessingEnforcement = false;
+                    
+                    // Disable tap interception
+                    tapInterceptor.classList.remove('active');
                     
                     window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                         type: 'ended'
@@ -434,6 +643,7 @@ internal class VimeoHTMLGenerator {
                         maxAllowedSeek = 0;
                         lastValidTime = 0;
                         seekEventTimestamps = [];
+                        lastKnownPosition = 0;
                         
                         player.setCurrentTime(0).then(function() {
                             console.log('[VimeoRestrictedPlayer] Video restarted');
@@ -482,6 +692,7 @@ internal class VimeoHTMLGenerator {
                     player.setCurrentTime(targetTime).then(function(seconds) {
                         console.log('[VimeoRestrictedPlayer] Successfully set time to:', seconds);
                         currentTime = targetTime;
+                        lastKnownPosition = targetTime;
                         
                         setTimeout(function() {
                             isUserSeeking = false;
@@ -553,6 +764,7 @@ internal class VimeoHTMLGenerator {
                         maxAllowedSeek = newMax;
                         actualMaxWatchedPosition = newMax;
                         lastValidTime = Math.min(currentTime, maxAllowedSeek);
+                        lastKnownPosition = Math.min(lastKnownPosition, maxAllowedSeek);
                     }
                 }
                 
@@ -632,9 +844,22 @@ internal class VimeoHTMLGenerator {
                         restrictionCheckInterval = null;
                     }
                     
+                    if (positionCheckInterval) {
+                        clearInterval(positionCheckInterval);
+                        positionCheckInterval = null;
+                    }
+                    
+                    if (tapTimeout) {
+                        clearTimeout(tapTimeout);
+                        tapTimeout = null;
+                    }
+                    
                     // Clear enforcement queue
                     enforcementQueue = [];
                     isProcessingEnforcement = false;
+                    
+                    // Disable tap interception
+                    tapInterceptor.classList.remove('active');
                     
                     // Pause video if ready
                     if (isVideoReady) {
@@ -650,6 +875,8 @@ internal class VimeoHTMLGenerator {
                     isUserSeeking = false;
                     seekEventTimestamps = [];
                     stateVersion = 0;
+                    lastKnownPosition = 0;
+                    lastTapTime = 0;
                     
                     console.log('[VimeoRestrictedPlayer] Cleanup completed');
                 }
@@ -661,13 +888,43 @@ internal class VimeoHTMLGenerator {
                         if (restrictionCheckInterval) {
                             clearInterval(restrictionCheckInterval);
                         }
+                        if (positionCheckInterval) {
+                            clearInterval(positionCheckInterval);
+                        }
                     } else {
                         console.log('[VimeoRestrictedPlayer] Page visible, resuming monitoring');
                         if (seekRestrictionEnabled && !isCompleted && isVideoReady) {
                             startRestrictionMonitoring();
+                            startPositionTracking();
                         }
                     }
                 });
+                
+                // Intercept keyboard events for arrow keys
+                document.addEventListener('keydown', function(e) {
+                    if (!seekRestrictionEnabled || isCompleted || !isVideoReady) return;
+                    
+                    // Right arrow (fast forward) or Left arrow (rewind)
+                    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                        player.getCurrentTime().then(function(time) {
+                            var seekAmount = e.shiftKey ? 10 : 5; // Shift+arrow = 10s, arrow = 5s
+                            var targetTime = e.key === 'ArrowRight' ? time + seekAmount : time - seekAmount;
+                            
+                            if (e.key === 'ArrowRight' && targetTime > maxAllowedSeek + SEEK_TOLERANCE) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log('[VimeoRestrictedPlayer] Keyboard forward seek blocked');
+                                
+                                queueEnforcement({
+                                    time: targetTime,
+                                    source: 'keyboard-forward',
+                                    timestamp: Date.now(),
+                                    priority: 'high'
+                                });
+                            }
+                        });
+                    }
+                }, true);
             </script>
         </body>
         </html>
