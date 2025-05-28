@@ -11,51 +11,91 @@ import Foundation
 /// Utility for parsing Vimeo URLs
 internal struct VimeoURLParser {
     
-    /// Parse a Vimeo URL to extract video ID and hash
-    /// - Parameter urlString: The Vimeo URL string
-    /// - Returns: Tuple containing video ID and hash, or nil if parsing fails
+    /// Parse a Vimeo URL to extract video ID and hash.
+    ///
+    /// It handles URLs with or without a scheme, with various Vimeo domains (including player),
+    /// and paths that might include other segments before the video ID.
+    /// The hash is considered optional; if not present, an empty string is returned for the hash.
+    ///
+    /// - Parameter urlString: The Vimeo URL string.
+    /// - Returns: A tuple containing the `videoId` (String) and `hash` (String, empty if not found),
+    ///            or `nil` if a numeric video ID cannot be parsed.
     static func parse(_ urlString: String) -> (videoId: String, hash: String)? {
-        // Remove common URL prefixes
+        // MARK: - Primary Parsing using URLComponents
+        // This method is generally more robust for well-formed URLs and complex paths.
+        if let url = URL(string: urlString) {
+            // url.pathComponents can include "/" and empty strings, filter them out.
+            // e.g., "https://vimeo.com/123/abc" -> pathComponents: ["/", "123", "abc"]
+            // e.g., "vimeo.com/123/abc" (no scheme) -> pathComponents: ["/", "vimeo.com", "123", "abc"]
+            let components = url.pathComponents.filter { !$0.isEmpty && $0 != "/" }
+            
+            // Find the first purely numeric component in the path. This is assumed to be the videoId.
+            // This handles paths like "/channels/foo/123456789/hash" or just "/123456789".
+            if let videoIdIndex = components.firstIndex(where: { $0.allSatisfy({ char in char.isNumber }) && !$0.isEmpty }) {
+                let videoId = components[videoIdIndex]
+                
+                // Check if a hash component exists immediately after the videoId.
+                if videoIdIndex + 1 < components.count {
+                    let hashValue = components[videoIdIndex + 1]
+                    // A hash value should not be an empty string if the component exists.
+                    if !hashValue.isEmpty {
+                        return (videoId: videoId, hash: hashValue)
+                    } else {
+                        // If the next component is empty (e.g., from a URL like "vimeo.com/123//"),
+                        // treat it as if there's no hash.
+                        return (videoId: videoId, hash: "")
+                    }
+                } else {
+                    // No component follows the videoId, so no hash is present.
+                    return (videoId: videoId, hash: "")
+                }
+            }
+        }
+        
+        // MARK: - Fallback Parsing using String Manipulation
+        // This handles simpler cases, URLs that URL(string:) might fail to parse,
+        // or when the URLComponents method doesn't find a numeric ID (e.g. if the string is just "123/hash").
         let cleanedURL = urlString
             .replacingOccurrences(of: "https://vimeo.com/", with: "")
             .replacingOccurrences(of: "http://vimeo.com/", with: "")
             .replacingOccurrences(of: "https://www.vimeo.com/", with: "")
             .replacingOccurrences(of: "http://www.vimeo.com/", with: "")
-            .replacingOccurrences(of: "vimeo.com/", with: "")
-            .replacingOccurrences(of: "www.vimeo.com/", with: "")
+            .replacingOccurrences(of: "player.vimeo.com/video/", with: "") // Handle player URLs
+            .replacingOccurrences(of: "vimeo.com/", with: "") // Generic vimeo.com prefix
+            .replacingOccurrences(of: "www.vimeo.com/", with: "") // Generic www.vimeo.com prefix
+        // Remove query parameters and fragments which might interfere with path splitting
+            .components(separatedBy: "?").first?
+            .components(separatedBy: "#").first ?? ""
         
-        // Split by '/' to get components
-        let components = cleanedURL.components(separatedBy: "/")
+        // Split the cleaned string by "/" and remove any empty components that might result
+        // (e.g., from trailing slashes or consecutive slashes).
+        let components = cleanedURL.components(separatedBy: "/").filter { !$0.isEmpty }
         
-        // Standard Vimeo URL format: VIDEO_ID/HASH
-        if components.count == 2,
-           !components[0].isEmpty,
-           !components[1].isEmpty {
-            return (videoId: components[0], hash: components[1])
+        // After cleaning, if the first component is numeric, it's considered the video ID.
+        if let firstComponent = components.first,
+           firstComponent.allSatisfy({ char in char.isNumber }),
+           !firstComponent.isEmpty {
+            
+            let videoId = firstComponent
+            // If there's a second component, it's treated as the hash.
+            if components.count >= 2 {
+                let hashValue = components[1]
+                // Ensure the hash component itself is not empty.
+                if !hashValue.isEmpty {
+                    return (videoId: videoId, hash: hashValue)
+                } else {
+                    // e.g., if cleanedURL was "12345/", components would be ["12345"],
+                    // but if it was "12345//hash", filter { !$0.isEmpty } would handle it.
+                    // This case handles if components[1] was explicitly an empty string segment somehow.
+                    return (videoId: videoId, hash: "")
+                }
+            } else {
+                // Only one component (the videoId) was found; no hash.
+                return (videoId: videoId, hash: "")
+            }
         }
         
-        // Try parsing with URL components
-        if let url = URL(string: urlString) {
-            let pathComponents = url.pathComponents.filter { $0 != "/" }
-            
-            if pathComponents.count >= 2 {
-                let videoId = pathComponents[0]
-                let hash = pathComponents[1]
-                
-                // Validate that video ID is numeric
-                if videoId.allSatisfy({ $0.isNumber }) {
-                    return (videoId: videoId, hash: hash)
-                }
-            }
-            
-            // Check for video ID in different positions
-            for (index, component) in pathComponents.enumerated() {
-                if component.allSatisfy({ $0.isNumber }) && index + 1 < pathComponents.count {
-                    return (videoId: component, hash: pathComponents[index + 1])
-                }
-            }
-        }
-        
+        // If neither parsing method succeeds in finding a numeric video ID.
         return nil
     }
     
