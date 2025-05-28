@@ -83,6 +83,8 @@ internal class VimeoHTMLGenerator {
                 var SEEK_TOLERANCE = \(seekTolerance);
                 var actualMaxWatchedPosition = \(maxAllowedSeek);
                 var pendingResumeAfterAlert = false;
+                var bookmarkPending = false;
+                var bookmarkTime = lastWatchedTime;
                 
                 // Player ready event
                 player.ready().then(function() {
@@ -112,6 +114,12 @@ internal class VimeoHTMLGenerator {
                             startRestrictionMonitoring();
                         }
                         
+                        // Handle pending bookmark
+                        if (bookmarkPending) {
+                            console.log('[VimeoRestrictedPlayer] Applying pending bookmark');
+                            applyBookmark();
+                        }
+                        
                     }).catch(function(error) {
                         console.log('[VimeoRestrictedPlayer] Error getting duration:', error);
                         
@@ -125,6 +133,12 @@ internal class VimeoHTMLGenerator {
                         
                         if (seekRestrictionEnabled && !isCompleted) {
                             startRestrictionMonitoring();
+                        }
+                        
+                        // Handle pending bookmark
+                        if (bookmarkPending) {
+                            console.log('[VimeoRestrictedPlayer] Applying pending bookmark after duration error');
+                            applyBookmark();
                         }
                     });
                 });
@@ -143,16 +157,11 @@ internal class VimeoHTMLGenerator {
                                     console.log('[VimeoRestrictedPlayer] Restriction violation detected:', time, 'max:', maxAllowedSeek);
                                     enforceRestrictionImmediate(time);
                                 }
-                                // Update max watched position during normal playback
-                                else if (!isUserSeeking && time > actualMaxWatchedPosition) {
-                                    actualMaxWatchedPosition = time;
-                                    maxAllowedSeek = time;
-                                }
                             }).catch(function(error) {
                                 console.log('[VimeoRestrictedPlayer] Error in monitoring:', error);
                             });
                         }
-                    }, 50); // Increased frequency to 50ms
+                    }, 50); // 50ms monitoring interval
                 }
                 
                 // Time update event
@@ -181,7 +190,7 @@ internal class VimeoHTMLGenerator {
                     });
                 });
                 
-                // Restriction enforcement with enhanced reliability
+                // Enhanced restriction enforcement
                 function enforceRestrictionImmediate(violationTime) {
                     if (isEnforcingRestriction || !seekRestrictionEnabled || isCompleted) {
                         return;
@@ -229,12 +238,13 @@ internal class VimeoHTMLGenerator {
                                         });
                                         
                                         isEnforcingRestriction = false;
+                                        currentTime = verifyTime;
                                         
                                     }).catch(function(error) {
                                         console.log('[VimeoRestrictedPlayer] Error verifying position:', error);
                                         isEnforcingRestriction = false;
                                     });
-                                }, 300); // Increased verification delay
+                                }, 300); // 300ms verification delay
                                 
                             }).catch(function(error) {
                                 console.log('[VimeoRestrictedPlayer] Error setting time:', error);
@@ -250,7 +260,7 @@ internal class VimeoHTMLGenerator {
                     });
                 }
                 
-                // Seeking event
+                // Seeking event - FIXED sequential seek handling
                 player.on('seeking', function(data) {
                     console.log('[VimeoRestrictedPlayer] Seeking event:', data.seconds);
                     isUserSeeking = true;
@@ -261,14 +271,19 @@ internal class VimeoHTMLGenerator {
                     
                     var seekTime = data.seconds;
                     if (seekRestrictionEnabled && !isCompleted && seekTime > maxAllowedSeek + SEEK_TOLERANCE) {
+                        console.log('[VimeoRestrictedPlayer] Seeking beyond allowed point');
                         enforceRestrictionImmediate(seekTime);
                     }
                 });
                 
-                // Seeked event
+                // Seeked event - FIXED sequential seek handling
                 player.on('seeked', function(data) {
                     console.log('[VimeoRestrictedPlayer] Seeked event:', data.seconds);
-                    isUserSeeking = false;
+                    
+                    // Delay clearing seeking flag to catch sequential seeks
+                    setTimeout(function() {
+                        isUserSeeking = false;
+                    }, 300);
                     
                     if (isEnforcingRestriction) {
                         return;
@@ -276,6 +291,7 @@ internal class VimeoHTMLGenerator {
                     
                     var currentSeekTime = data.seconds;
                     if (seekRestrictionEnabled && !isCompleted && currentSeekTime > maxAllowedSeek + SEEK_TOLERANCE) {
+                        console.log('[VimeoRestrictedPlayer] Seeked beyond allowed point');
                         enforceRestrictionImmediate(currentSeekTime);
                     }
                 });
@@ -306,7 +322,34 @@ internal class VimeoHTMLGenerator {
                     });
                 });
                 
-                // Function to restart video
+                // Bookmark application
+                function applyBookmark() {
+                    if (!isVideoReady) {
+                        console.log('[VimeoRestrictedPlayer] Player not ready for bookmark');
+                        bookmarkPending = true;
+                        return;
+                    }
+                    
+                    console.log('[VimeoRestrictedPlayer] Applying bookmark at:', bookmarkTime);
+                    player.setCurrentTime(bookmarkTime).then(function() {
+                        console.log('[VimeoRestrictedPlayer] Bookmark applied');
+                        currentTime = bookmarkTime;
+                        lastValidTime = bookmarkTime;
+                        bookmarkPending = false;
+                        
+                        // Update max allowed to at least the bookmark position
+                        if (bookmarkTime > actualMaxWatchedPosition) {
+                            actualMaxWatchedPosition = bookmarkTime;
+                            maxAllowedSeek = bookmarkTime;
+                        }
+                        
+                    }).catch(function(error) {
+                        console.log('[VimeoRestrictedPlayer] Error applying bookmark:', error);
+                        bookmarkPending = false;
+                    });
+                }
+                
+                // Restart video
                 function restartVideo() {
                     if (isVideoReady && !isEnforcingRestriction) {
                         console.log('[VimeoRestrictedPlayer] Restarting video');
@@ -351,6 +394,8 @@ internal class VimeoHTMLGenerator {
                     
                     player.setCurrentTime(targetTime).then(function(seconds) {
                         console.log('[VimeoRestrictedPlayer] Successfully set time to:', seconds);
+                        currentTime = seconds;
+                        lastValidTime = seconds;
                         
                         if (shouldPlay) {
                             player.play().catch(function(error) {
@@ -368,6 +413,13 @@ internal class VimeoHTMLGenerator {
                     }).catch(function(error) {
                         console.log('[VimeoRestrictedPlayer] Error setting time:', error);
                     });
+                }
+                
+                // Resume from bookmark position - FIXED
+                function resumeFromBookmark() {
+                    console.log('[VimeoRestrictedPlayer] Resuming from bookmark:', lastWatchedTime);
+                    bookmarkTime = lastWatchedTime;
+                    applyBookmark();
                 }
                 
                 // Play video
