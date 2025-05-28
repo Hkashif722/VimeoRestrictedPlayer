@@ -8,7 +8,7 @@
 import Foundation
 
 /// Generates HTML content for Vimeo player
-internal class generateHTML {
+internal class generateHTML  {
     
     private let configuration: VimeoPlayerConfiguration
     
