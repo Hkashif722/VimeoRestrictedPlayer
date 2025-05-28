@@ -2,7 +2,7 @@
 //  VimeoHTMLGenerator.swift
 //  VimeoRestrictedPlayer
 //
-//  Generates HTML/JavaScript for Vimeo player integration
+//  Created by Kashif Hussain on 28/05/25.
 //
 
 import Foundation

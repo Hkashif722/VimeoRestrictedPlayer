@@ -2,8 +2,9 @@
 //  VimeoURLParser.swift
 //  VimeoRestrictedPlayer
 //
-//  Utility for parsing Vimeo URLs
+//  Created by Kashif Hussain on 28/05/25.
 //
+
 
 import Foundation
 

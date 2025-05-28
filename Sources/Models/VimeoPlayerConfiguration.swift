@@ -2,8 +2,9 @@
 //  VimeoPlayerConfiguration.swift
 //  VimeoRestrictedPlayer
 //
-//  Configuration model for VimeoRestrictedPlayer
+//  Created by Kashif Hussain on 28/05/25.
 //
+
 
 import UIKit
 

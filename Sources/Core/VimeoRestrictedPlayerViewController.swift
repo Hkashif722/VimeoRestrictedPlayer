@@ -6,13 +6,6 @@
 //
 
 
-//
-//  VimeoRestrictedPlayerViewController.swift
-//  VimeoRestrictedPlayer
-//
-//  Main view controller for VimeoRestrictedPlayer
-//
-
 import UIKit
 import WebKit
 

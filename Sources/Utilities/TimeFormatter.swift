@@ -6,13 +6,6 @@
 //
 
 
-//
-//  TimeFormatter.swift
-//  VimeoRestrictedPlayer
-//
-//  Utility for formatting time values
-//
-
 import Foundation
 
 /// Utility class for formatting time values

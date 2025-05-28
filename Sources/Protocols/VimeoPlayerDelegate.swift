@@ -6,13 +6,6 @@
 //
 
 
-//
-//  VimeoPlayerDelegate.swift
-//  VimeoRestrictedPlayer
-//
-//  Delegate protocol for VimeoRestrictedPlayer events
-//
-
 import Foundation
 
 /// Delegate protocol for receiving VimeoRestrictedPlayer events
