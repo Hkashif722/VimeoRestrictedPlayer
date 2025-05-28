@@ -25,7 +25,7 @@ internal class VimeoHTMLGenerator {
         let videoTitle = configuration.videoTitle ?? "Video"
         
         // Ensure maxAllowedSeekPosition is at least equal to lastWatched
-        let maxAllowedSeek = max(maxAllowedSeekPosition, lastWatched)
+        let maxAllowedSeek = max(lastWatched, lastWatched)
         
         return """
             <!DOCTYPE html>
