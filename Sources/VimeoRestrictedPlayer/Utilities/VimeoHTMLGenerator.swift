@@ -51,25 +51,10 @@ internal class VimeoHTMLGenerator {
                     height: 100%;
                     border: none;
                 }
-                /* Custom title overlay if needed */
-                .custom-title {
-                    position: absolute;
-                    top: 20px;
-                    left: 20px;
-                    color: white;
-                    font-size: 18px;
-                    font-weight: bold;
-                    text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-                    z-index: 10;
-                    display: none; /* Hidden by default */
-                }
             </style>
         </head>
         <body>
             <div class="video-container">
-               <!-- Optional custom title overlay -->
-               <div class="custom-title" id="custom-title">\(videoTitle)</div>
-               
                <iframe id="vimeo-player" 
                      src="https://player.vimeo.com/video/\(videoID)?h=\(hash)&autoplay=\(autoplay)&loop=false&title=true&byline=false&portrait=false&controls=true&playsinline=true"
                        frameborder="0" 
@@ -99,87 +84,21 @@ internal class VimeoHTMLGenerator {
                 var actualMaxWatchedPosition = \(maxAllowedSeek);
                 var pendingResumeAfterAlert = false;
                 var hasHandledInitialBookmark = false;
-                var isFullscreen = false;
-                var lastScale = 1;
-                
-                // Safe message posting to avoid user interaction count issues
-                function postMessageSafely(message) {
-                    // Delay message posting to avoid interaction count issues
-                    setTimeout(function() {
-                        try {
-                            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.vimeoPlayerHandler) {
-                                window.webkit.messageHandlers.vimeoPlayerHandler.postMessage(message);
-                            }
-                        } catch (error) {
-                            console.log('[VimeoRestrictedPlayer] Error posting message:', error);
-                        }
-                    }, 0);
-                }
-                
-                // Detect fullscreen changes
-                document.addEventListener('fullscreenchange', handleFullscreenChange);
-                document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-                
-                function handleFullscreenChange() {
-                    isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-                    console.log('[VimeoRestrictedPlayer] Fullscreen:', isFullscreen);
-                    
-                    postMessageSafely({
-                        type: 'fullscreenChange',
-                        isFullscreen: isFullscreen
-                    });
-                    
-                    if (isFullscreen && seekRestrictionEnabled && !isCompleted) {
-                        // Increase monitoring frequency in fullscreen
-                        startRestrictionMonitoring(250); // Check every 250ms instead of 500ms
-                    } else if (!isFullscreen && seekRestrictionEnabled && !isCompleted) {
-                        startRestrictionMonitoring(500); // Back to normal frequency
-                    }
-                }
-                
-                // Add iOS-specific viewport monitoring for pinch-to-zoom
-                if (window.visualViewport) {
-                    window.visualViewport.addEventListener('resize', function() {
-                        var currentScale = window.visualViewport.scale;
-                        if (currentScale !== lastScale && currentScale > 1.5) {
-                            console.log('[VimeoRestrictedPlayer] Zoom detected, scale:', currentScale);
-                            // Force a restriction check
-                            if (seekRestrictionEnabled && !isCompleted && !isEnforcingRestriction) {
-                                player.getCurrentTime().then(function(time) {
-                                    if (time > maxAllowedSeek + SEEK_TOLERANCE) {
-                                        enforceRestrictionImmediate(time);
-                                    }
-                                }).catch(function(error) {
-                                    console.log('[VimeoRestrictedPlayer] Error checking time on zoom:', error);
-                                });
-                            }
-                        }
-                        lastScale = currentScale;
-                    });
-                }
                 
                 // Player ready event
                 player.ready().then(function() {
                     isVideoReady = true;
                     console.log('[VimeoRestrictedPlayer] Player ready');
                     
-                    // Get video metadata including title
-                    Promise.all([
-                        player.getDuration(),
-                        player.getVideoTitle()
-                    ]).then(function(results) {
-                        duration = results[0];
-                        var vimeoTitle = results[1];
-                        
+                    // Get duration
+                    player.getDuration().then(function(videoDuration) {
+                        duration = videoDuration;
                         console.log('[VimeoRestrictedPlayer] Duration:', duration);
-                        console.log('[VimeoRestrictedPlayer] Vimeo Title:', vimeoTitle);
                         
-                        // Send ready message with title info
-                        postMessageSafely({
+                        // Send ready message
+                        window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                             type: 'ready',
                             duration: duration,
-                            vimeoTitle: vimeoTitle,
-                            configuredTitle: "\(videoTitle)",
                             lastWatchedTime: lastWatchedTime,
                             maxAllowedSeek: maxAllowedSeek,
                             shouldShowResumeDialog: lastWatchedTime > \(configuration.resumeOptions.minimumWatchedForResume)
@@ -191,10 +110,10 @@ internal class VimeoHTMLGenerator {
                         }
                         
                     }).catch(function(error) {
-                        console.log('[VimeoRestrictedPlayer] Error getting video info:', error);
+                        console.log('[VimeoRestrictedPlayer] Error getting duration:', error);
                         
                         // Still send ready message
-                        postMessageSafely({
+                        window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                             type: 'ready',
                             lastWatchedTime: lastWatchedTime,
                             maxAllowedSeek: maxAllowedSeek,
@@ -205,14 +124,10 @@ internal class VimeoHTMLGenerator {
                             startRestrictionMonitoring();
                         }
                     });
-                }).catch(function(error) {
-                    console.log('[VimeoRestrictedPlayer] Player ready error:', error);
                 });
                 
-                // Continuous monitoring function with adjustable interval
-                function startRestrictionMonitoring(interval) {
-                    interval = interval || 500; // Default to 500ms
-                    
+                // Continuous monitoring function
+                function startRestrictionMonitoring() {
                     if (restrictionCheckInterval) {
                         clearInterval(restrictionCheckInterval);
                     }
@@ -221,14 +136,14 @@ internal class VimeoHTMLGenerator {
                         if (isVideoReady && !isEnforcingRestriction && seekRestrictionEnabled && !isCompleted) {
                             player.getCurrentTime().then(function(time) {
                                 if (time > maxAllowedSeek + SEEK_TOLERANCE) {
-                                    console.log('[VimeoRestrictedPlayer] Restriction violation detected:', time, 'max:', maxAllowedSeek, 'fullscreen:', isFullscreen);
+                                    console.log('[VimeoRestrictedPlayer] Restriction violation detected:', time, 'max:', maxAllowedSeek);
                                     enforceRestrictionImmediate(time);
                                 }
                             }).catch(function(error) {
                                 console.log('[VimeoRestrictedPlayer] Error in monitoring:', error);
                             });
                         }
-                    }, interval);
+                    }, 500);
                 }
                 
                 // Time update event
@@ -257,20 +172,20 @@ internal class VimeoHTMLGenerator {
                         lastValidTime = currentTime;
                     }
                     
-                    postMessageSafely({
+                    window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                         type: 'timeUpdate',
                         currentTime: currentTime,
                         maxAllowed: maxAllowedSeek
                     });
                 });
                 
-                // Restriction enforcement with better error handling
+                // Restriction enforcement
                 function enforceRestrictionImmediate(violationTime) {
                     if (isEnforcingRestriction || !seekRestrictionEnabled || isCompleted) {
                         return;
                     }
                     
-                    if (violationTime <= maxAllowedSeek + SEEK_TOLERANCE) {
+                     if (violationTime <= maxAllowedSeek + SEEK_TOLERANCE) {
                         console.log('[VimeoRestrictedPlayer] Within tolerance, ignoring');
                         return;
                     }
@@ -282,48 +197,46 @@ internal class VimeoHTMLGenerator {
                         clearTimeout(restrictionCorrectionTimeout);
                     }
                     
-                    // Wrap the entire enforcement in try-catch
-                    try {
-                        player.getPaused().then(function(paused) {
-                            wasPlayingBeforeSeek = !paused;
-                            pendingResumeAfterAlert = wasPlayingBeforeSeek;
-                            
-                            return player.pause();
-                        }).then(function() {
-                            return player.setCurrentTime(maxAllowedSeek);
-                        }).then(function() {
-                            console.log('[VimeoRestrictedPlayer] Corrected to:', maxAllowedSeek);
-                            
-                            // Verify position after a delay
-                            restrictionCorrectionTimeout = setTimeout(function() {
-                                player.getCurrentTime().then(function(verifyTime) {
-                                    console.log('[VimeoRestrictedPlayer] Position verified:', verifyTime);
-                                    
-                                    postMessageSafely({
-                                        type: 'seekRestricted',
-                                        attemptedTime: violationTime,
-                                        maxAllowed: maxAllowedSeek,
-                                        wasPlaying: wasPlayingBeforeSeek,
-                                        actualPosition: verifyTime,
-                                        isFullscreen: isFullscreen
+                    player.getPaused().then(function(paused) {
+                        wasPlayingBeforeSeek = !paused;
+                        pendingResumeAfterAlert = wasPlayingBeforeSeek;
+                        
+                        player.pause().then(function() {
+                            player.setCurrentTime(maxAllowedSeek).then(function() {
+                                console.log('[VimeoRestrictedPlayer] Corrected to:', maxAllowedSeek);
+                                
+                                setTimeout(function() {
+                                    player.getCurrentTime().then(function(verifyTime) {
+                                        console.log('[VimeoRestrictedPlayer] Position verified:', verifyTime);
+                                        
+                                        window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
+                                            type: 'seekRestricted',
+                                            attemptedTime: violationTime,
+                                            maxAllowed: maxAllowedSeek,
+                                            wasPlaying: wasPlayingBeforeSeek,
+                                            actualPosition: verifyTime
+                                        });
+                                        
+                                        isEnforcingRestriction = false;
+                                        
+                                    }).catch(function(error) {
+                                        console.log('[VimeoRestrictedPlayer] Error verifying position:', error);
+                                        isEnforcingRestriction = false;
                                     });
-                                    
-                                    isEnforcingRestriction = false;
-                                    
-                                }).catch(function(error) {
-                                    console.log('[VimeoRestrictedPlayer] Error verifying position:', error);
-                                    isEnforcingRestriction = false;
-                                });
-                            }, 100);
-                            
+                                }, 100);
+                                
+                            }).catch(function(error) {
+                                console.log('[VimeoRestrictedPlayer] Error setting time:', error);
+                                isEnforcingRestriction = false;
+                            });
                         }).catch(function(error) {
-                            console.log('[VimeoRestrictedPlayer] Error in enforcement chain:', error);
+                            console.log('[VimeoRestrictedPlayer] Error pausing:', error);
                             isEnforcingRestriction = false;
                         });
-                    } catch (error) {
-                        console.log('[VimeoRestrictedPlayer] Sync error in enforcement:', error);
+                    }).catch(function(error) {
+                        console.log('[VimeoRestrictedPlayer] Error getting paused state:', error);
                         isEnforcingRestriction = false;
-                    }
+                    });
                 }
                 
                 // Seeking event
@@ -361,21 +274,27 @@ internal class VimeoHTMLGenerator {
                     }
                 });
                 
-                // Other events with safe message posting
+                // Other events
                 player.on('play', function() {
-                    postMessageSafely({ type: 'play' });
+                    window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
+                        type: 'play'
+                    });
                 });
                 
                 player.on('pause', function() {
-                    postMessageSafely({ type: 'pause' });
+                    window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
+                        type: 'pause'
+                    });
                 });
                 
                 player.on('ended', function() {
-                    postMessageSafely({ type: 'ended' });
+                    window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
+                        type: 'ended'
+                    });
                 });
                 
                 player.on('error', function(error) {
-                    postMessageSafely({
+                    window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                         type: 'error',
                         error: error.message || 'Unknown error'
                     });
@@ -443,7 +362,7 @@ internal class VimeoHTMLGenerator {
                             });
                         }
                         
-                        postMessageSafely({
+                        window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                             type: 'seekCompleted',
                             time: targetTime,
                             wasRequested: time,
@@ -453,7 +372,7 @@ internal class VimeoHTMLGenerator {
                     }).catch(function(error) {
                         console.log('[VimeoRestrictedPlayer] Error setting time:', error);
                         
-                        postMessageSafely({
+                        window.webkit.messageHandlers.vimeoPlayerHandler.postMessage({
                             type: 'seekError',
                             error: error.message,
                             requestedTime: time
@@ -510,8 +429,7 @@ internal class VimeoHTMLGenerator {
                             isEnforcing: isEnforcingRestriction,
                             lastValid: lastValidTime,
                             pendingResume: pendingResumeAfterAlert,
-                            lastWatchedTime: lastWatchedTime,
-                            isFullscreen: isFullscreen
+                            lastWatchedTime: lastWatchedTime
                         };
                     }
                     return null;
@@ -533,28 +451,24 @@ internal class VimeoHTMLGenerator {
                                 console.log('[VimeoRestrictedPlayer] Position corrected');
                                 
                                 if (pendingResumeAfterAlert) {
-                                    setTimeout(function() {
-                                        player.play().then(function() {
-                                            console.log('[VimeoRestrictedPlayer] Video resumed');
-                                            pendingResumeAfterAlert = false;
-                                        }).catch(function(error) {
-                                            console.log('[VimeoRestrictedPlayer] Error resuming:', error);
-                                        });
-                                    }, 100);
-                                }
-                            }).catch(function(error) {
-                                console.log('[VimeoRestrictedPlayer] Error correcting position:', error);
-                            });
-                        } else {
-                            if (pendingResumeAfterAlert) {
-                                setTimeout(function() {
                                     player.play().then(function() {
                                         console.log('[VimeoRestrictedPlayer] Video resumed');
                                         pendingResumeAfterAlert = false;
                                     }).catch(function(error) {
                                         console.log('[VimeoRestrictedPlayer] Error resuming:', error);
                                     });
-                                }, 100);
+                                }
+                            }).catch(function(error) {
+                                console.log('[VimeoRestrictedPlayer] Error correcting position:', error);
+                            });
+                        } else {
+                            if (pendingResumeAfterAlert) {
+                                player.play().then(function() {
+                                    console.log('[VimeoRestrictedPlayer] Video resumed');
+                                    pendingResumeAfterAlert = false;
+                                }).catch(function(error) {
+                                    console.log('[VimeoRestrictedPlayer] Error resuming:', error);
+                                });
                             }
                         }
                     }).catch(function(error) {
@@ -566,49 +480,29 @@ internal class VimeoHTMLGenerator {
                 function cleanup() {
                     console.log('[VimeoRestrictedPlayer] Cleanup called');
                     
-                    try {
-                        if (isVideoReady) {
-                            player.pause().catch(function(error) {
-                                console.log('[VimeoRestrictedPlayer] Error pausing during cleanup:', error);
-                            });
-                        }
-                        
-                        if (restrictionCheckInterval) {
-                            clearInterval(restrictionCheckInterval);
-                            restrictionCheckInterval = null;
-                        }
-                        
-                        if (restrictionCorrectionTimeout) {
-                            clearTimeout(restrictionCorrectionTimeout);
-                            restrictionCorrectionTimeout = null;
-                        }
-                        
-                        // Remove event listeners
-                        document.removeEventListener('fullscreenchange', handleFullscreenChange);
-                        document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-                        
-                        isEnforcingRestriction = false;
-                        pendingResumeAfterAlert = false;
-                        isVideoReady = false;
-                        
-                        console.log('[VimeoRestrictedPlayer] Cleanup completed');
-                    } catch (error) {
-                        console.log('[VimeoRestrictedPlayer] Error during cleanup:', error);
+                    if (isVideoReady) {
+                        player.pause().catch(function(error) {
+                            console.log('[VimeoRestrictedPlayer] Error pausing during cleanup:', error);
+                        });
                     }
+                    
+                    if (restrictionCheckInterval) {
+                        clearInterval(restrictionCheckInterval);
+                        restrictionCheckInterval = null;
+                    }
+                    
+                    if (restrictionCorrectionTimeout) {
+                        clearTimeout(restrictionCorrectionTimeout);
+                        restrictionCorrectionTimeout = null;
+                    }
+                    
+
+                    isEnforcingRestriction = false;
+                    pendingResumeAfterAlert = false;
+                    isVideoReady = false;
+                    
+                    console.log('[VimeoRestrictedPlayer] Cleanup completed');
                 }
-                
-                // Expose functions globally for iOS to call
-                window.VimeoPlayer = {
-                    restartVideo: restartVideo,
-                    setCurrentTime: setCurrentTime,
-                    resumeFromBookmark: resumeFromBookmark,
-                    playVideo: playVideo,
-                    pauseVideo: pauseVideo,
-                    updateMaxAllowedSeek: updateMaxAllowedSeek,
-                    getPlayerState: getPlayerState,
-                    resumeVideoAfterAlert: resumeVideoAfterAlert,
-                    cleanup: cleanup
-                };
             </script>
         </body>
         </html>
