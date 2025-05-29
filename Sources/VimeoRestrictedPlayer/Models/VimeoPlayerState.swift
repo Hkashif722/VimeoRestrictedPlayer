@@ -16,7 +16,7 @@
 import Foundation
 
 /// Comprehensive state management for VimeoRestrictedPlayer
-public struct VimeoPlayerState: Equatable {
+public struct VimeoPlayerState: Equatable, Codable {
     
     // MARK: - Core State Properties
     
@@ -202,7 +202,7 @@ public struct VimeoPlayerState: Equatable {
 
 // MARK: - Nested State Types
 
-public enum PlaybackState: Equatable, CaseIterable {
+public enum PlaybackState: Equatable, CaseIterable, Codable {
     case idle
     case playing
     case paused
@@ -212,7 +212,7 @@ public enum PlaybackState: Equatable, CaseIterable {
     case error
 }
 
-public enum LoadingState: Equatable {
+public enum LoadingState: Equatable, Codable {
     case notStarted
     case loading
     case loaded
@@ -220,7 +220,7 @@ public enum LoadingState: Equatable {
     case failed(VimeoPlayerError)
 }
 
-public enum NetworkState: Equatable {
+public enum NetworkState: Equatable, Codable {
     case unknown
     case connected
     case disconnected
@@ -229,14 +229,14 @@ public enum NetworkState: Equatable {
     case wifi
 }
 
-public enum ReadinessState: Equatable {
+public enum ReadinessState: Equatable, Codable {
     case notReady
     case initializing
     case ready
     case failed
 }
 
-public struct SeekState: Equatable {
+public struct SeekState: Equatable, Codable {
     public var isRestricted: Bool
     public var maxAllowedPosition: TimeInterval
     public var isUserSeeking: Bool
@@ -254,7 +254,7 @@ public struct SeekState: Equatable {
     static let idle = SeekState()
 }
 
-public struct VideoInfo: Equatable {
+public struct VideoInfo: Equatable, Codable {
     public var url: String
     public var title: String?
     public var videoID: String?
@@ -274,7 +274,7 @@ public struct VideoInfo: Equatable {
     }
 }
 
-public enum VideoQuality: String, Equatable, CaseIterable {
+public enum VideoQuality: String, Equatable, CaseIterable, Codable {
     case auto = "auto"
     case low = "360p"
     case medium = "480p"
@@ -283,7 +283,7 @@ public enum VideoQuality: String, Equatable, CaseIterable {
     case uhd = "4K"
 }
 
-public struct ProgressInfo: Equatable {
+public struct ProgressInfo: Equatable, Codable {
     public var currentTime: TimeInterval
     public var duration: TimeInterval
     public var maxWatchedPosition: TimeInterval
@@ -301,7 +301,7 @@ public struct ProgressInfo: Equatable {
     }
 }
 
-public struct InteractionState: Equatable {
+public struct InteractionState: Equatable, Codable {
     public var lastInteractionType: UserInteractionType?
     public var lastInteractionTime: Date?
     public var lastPlaybackChange: Date?
@@ -321,7 +321,7 @@ public struct InteractionState: Equatable {
     }
 }
 
-public enum UserInteractionType: String, Equatable, CaseIterable {
+public enum UserInteractionType: String, Equatable, CaseIterable, Codable {
     case play
     case pause
     case seek
@@ -332,7 +332,7 @@ public enum UserInteractionType: String, Equatable, CaseIterable {
     case dismiss
 }
 
-public struct SeekAttempt: Equatable {
+public struct SeekAttempt: Equatable, Codable {
     public let fromTime: TimeInterval
     public let toTime: TimeInterval
     public let timestamp: Date
@@ -346,7 +346,7 @@ public struct SeekAttempt: Equatable {
     }
 }
 
-public struct ErrorState: Equatable {
+public struct ErrorState: Equatable, Codable {
     public let error: VimeoPlayerError
     public let timestamp: Date
     public var recoveryAttempts: Int
@@ -358,7 +358,7 @@ public struct ErrorState: Equatable {
     }
 }
 
-public struct PerformanceInfo: Equatable {
+public struct PerformanceInfo: Equatable, Codable {
     public var lastLoadingStartTime: Date?
     public var lastLoadingDuration: TimeInterval?
     public var averageLoadingTime: TimeInterval?
@@ -527,7 +527,7 @@ public extension VimeoPlayerStateMachineDelegate {
 
 // MARK: - State Persistence
 
-extension VimeoPlayerState: Codable {
+extension VimeoPlayerState {
     
     /// Save state to UserDefaults
     public func save(forKey key: String) {

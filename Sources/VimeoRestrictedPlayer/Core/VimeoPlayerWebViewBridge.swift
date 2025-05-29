@@ -62,7 +62,7 @@ public class VimeoPlayerWebViewBridge: NSObject {
     /// Execute JavaScript with completion handler
     public func executeJavaScript(_ script: String, completion: ((Any?, Error?) -> Void)? = nil) {
         guard let webView = webView else {
-            completion?(nil, VimeoPlayerError.javascriptError("WebView not available"))
+            completion?(nil, VimeoPlayerErrorFactory.javascriptError(message: "WebView not available"))
             return
         }
         
@@ -71,7 +71,7 @@ public class VimeoPlayerWebViewBridge: NSObject {
                 webView.evaluateJavaScript(script) { result, error in
                     if let error = error {
                         print("[VimeoPlayerBridge] JS Error: \(error.localizedDescription)")
-                        completion?(nil, VimeoPlayerError.javascriptError(error.localizedDescription))
+                        completion?(nil, VimeoPlayerErrorFactory.javascriptError(message: error.localizedDescription))
                     } else {
                         completion?(result, nil)
                     }
@@ -89,7 +89,7 @@ public class VimeoPlayerWebViewBridge: NSObject {
             if let completion = completion {
                 // Execute queued completion after a delay to allow message to be processed
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    completion(nil, VimeoPlayerError.javascriptError("Player not ready"))
+                    completion(nil, VimeoPlayerErrorFactory.javascriptError(message: "Player not ready"))
                 }
             }
         }
@@ -247,7 +247,10 @@ public class VimeoPlayerWebViewBridge: NSObject {
     
     private func handleErrorMessage(_ data: [String: Any]) {
         let errorMessage = data["error"] as? String ?? "Unknown error"
-        let error = VimeoPlayerError.playbackFailed(errorMessage)
+        let error = VimeoPlayerErrorFactory.playbackError(
+            type: .generic,
+            message: errorMessage
+        )
         
         delegate?.bridge(self, didEncounterError: error)
     }
