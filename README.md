@@ -33,12 +33,7 @@ Or add it through Xcode:
 1. File → Add Package Dependencies
 2. Enter the repository URL
 3. Select version requirements
-
-### CocoaPods
-
-```ruby
-pod 'VimeoRestrictedPlayer', '~> 1.0'
-```
+   
 
 ## Quick Start
 
