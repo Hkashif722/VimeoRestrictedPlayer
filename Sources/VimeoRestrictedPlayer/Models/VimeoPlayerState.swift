@@ -447,7 +447,7 @@ public class VimeoPlayerStateMachine {
     
     public func canTransition(to state: PlaybackState) -> Bool {
         switch (currentState.playbackState, state) {
-        case (.idle, .playing), (.idle, .loading):
+        case (.idle, .playing), (.idle, .buffering):
             return currentState.isReady
         case (.playing, .paused), (.paused, .playing):
             return true
@@ -484,7 +484,7 @@ public class VimeoPlayerStateMachine {
         }
         
         // Notify delegate
-        delegate?.stateMachine(self, didTransition: from: previousState, to: newState)
+        delegate?.stateMachine(self, didTransition: previousState, to: newState)
         
         // Handle specific transitions
         if previousState.playbackState != newState.playbackState {
