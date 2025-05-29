@@ -158,55 +158,7 @@ public struct SeekRestrictionOptions {
     public static let `default` = SeekRestrictionOptions()
 }
 
-// MARK: - Theme Configuration
 
-public struct VimeoPlayerTheme {
-    /// Background color of the player
-    public var backgroundColor: UIColor
-    
-    /// Tint color for controls
-    public var controlsTintColor: UIColor
-    
-    /// Loading indicator style
-    public var loadingIndicatorStyle: UIActivityIndicatorView.Style
-    
-    /// Back button image
-    public var backButtonImage: UIImage?
-    
-    /// Back button background color
-    public var backButtonBackgroundColor: UIColor
-    
-    /// Back button size
-    public var backButtonSize: CGSize
-    
-    /// Back button corner radius
-    public var backButtonCornerRadius: CGFloat
-    
-    /// Back button position
-    public var backButtonPosition: BackButtonPosition
-    
-    public init(
-        backgroundColor: UIColor = .black,
-        controlsTintColor: UIColor = .white,
-        loadingIndicatorStyle: UIActivityIndicatorView.Style = .large,
-        backButtonImage: UIImage? = nil,
-        backButtonBackgroundColor: UIColor = UIColor.black.withAlphaComponent(0.5),
-        backButtonSize: CGSize = CGSize(width: 40, height: 40),
-        backButtonCornerRadius: CGFloat = 20,
-        backButtonPosition: BackButtonPosition = .topLeft()
-    ) {
-        self.backgroundColor = backgroundColor
-        self.controlsTintColor = controlsTintColor
-        self.loadingIndicatorStyle = loadingIndicatorStyle
-        self.backButtonImage = backButtonImage ?? UIImage(systemName: "chevron.left")
-        self.backButtonBackgroundColor = backButtonBackgroundColor
-        self.backButtonSize = backButtonSize
-        self.backButtonCornerRadius = backButtonCornerRadius
-        self.backButtonPosition = backButtonPosition
-    }
-    
-    public static let `default` = VimeoPlayerTheme()
-}
 
 // MARK: - Back Button Position
 

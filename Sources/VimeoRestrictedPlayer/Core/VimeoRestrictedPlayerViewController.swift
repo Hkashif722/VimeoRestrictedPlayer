@@ -1,5 +1,5 @@
 //
-//  VimeoRestrictedPlayerViewController.swift
+//  VimeoRestrictedPlayerViewController.swift (Enhanced)
 //  VimeoRestrictedPlayer
 //
 //  Created by Kashif Hussain on 28/05/25.
@@ -9,7 +9,7 @@
 import UIKit
 import WebKit
 
-/// Main view controller for playing Vimeo videos with restrictions
+/// Enhanced main view controller for playing Vimeo videos with restrictions
 open class VimeoRestrictedPlayerViewController: UIViewController {
     
     // MARK: - Public Properties
@@ -18,7 +18,9 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
     public weak var delegate: VimeoPlayerDelegate?
     
     /// Current configuration
-    public private(set) var configuration: VimeoPlayerConfiguration
+    public private(set) var configuration: VimeoPlayerConfiguration {
+        didSet { updateConfiguration() }
+    }
     
     /// Current playback time
     public private(set) var currentTime: TimeInterval = 0
@@ -27,17 +29,18 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
     public private(set) var duration: TimeInterval = 0
     
     /// Current player state
-    public private(set) var state: VimeoPlayerState = .idle {
-        didSet {
-            handleStateChange(from: oldValue, to: state)
-        }
+    public private(set) var state: VimeoPlayerState = .ideal {
+        didSet { handleStateChange(from: oldValue, to: state) }
+    }
+    
+    /// Whether to show native overlay controls
+    public var showsNativeControls: Bool = false {
+        didSet { updateControlsVisibility() }
     }
     
     /// Whether to show the back button
     public var showsBackButton: Bool = true {
-        didSet {
-            backButton.isHidden = !showsBackButton
-        }
+        didSet { updateBackButtonVisibility() }
     }
     
     /// Custom back button style
@@ -48,15 +51,16 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
     
     /// Back button style
     public var backButtonStyle: BackButtonStyle = .system {
-        didSet {
-            updateBackButtonStyle()
-        }
+        didSet { updateBackButtonStyle() }
     }
     
     // MARK: - Private Properties
     
     private var webView: WKWebView!
+    private var webViewBridge: VimeoPlayerWebViewBridge!
     private var htmlGenerator: VimeoHTMLGenerator!
+    private var nativeControls: VimeoPlayerControls?
+    
     private var currentWatchedDuration: TimeInterval = 0
     private var maxAllowedSeekPosition: TimeInterval = 0
     private var isVideoReady = false
@@ -65,20 +69,29 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
     private var isPendingSeek = false
     private var pendingSeekTime: TimeInterval = 0
     
+    // Enhanced error handling
+    private var retryCount = 0
+    private let maxRetryAttempts = 3
+    private var networkMonitor: NetworkMonitor?
+    
     // UI Elements
     private lazy var loadingIndicator: UIActivityIndicatorView = {
-        let indicator = UIActivityIndicatorView(style: configuration.theme.loadingIndicatorStyle)
-        indicator.color = configuration.theme.controlsTintColor
+        let indicator = UIActivityIndicatorView(style: configuration.theme.loading.style)
+        indicator.color = Color(configuration.theme.loading.color) as? UIColor ?? configuration.theme.colors.controlsTint
         indicator.translatesAutoresizingMaskIntoConstraints = false
         return indicator
     }()
     
+    private lazy var errorView: ErrorDisplayView = {
+        let view = ErrorDisplayView(theme: configuration.theme)
+        view.delegate = self
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.isHidden = true
+        return view
+    }()
+    
     private lazy var backButton: UIButton = {
         let button = UIButton(type: .system)
-        button.setImage(configuration.theme.backButtonImage, for: .normal)
-        button.tintColor = configuration.theme.controlsTintColor
-        button.backgroundColor = configuration.theme.backButtonBackgroundColor
-        button.layer.cornerRadius = configuration.theme.backButtonCornerRadius
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(backButtonTapped), for: .touchUpInside)
         return button
@@ -92,10 +105,16 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         self.currentWatchedDuration = configuration.lastWatchedDuration
         self.htmlGenerator = VimeoHTMLGenerator(configuration: configuration)
         super.init(nibName: nil, bundle: nil)
+        
+        setupNetworkMonitoring()
     }
     
     required public init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    deinit {
+        cleanup()
     }
     
     // MARK: - Lifecycle
@@ -104,42 +123,49 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         super.viewDidLoad()
         setupUI()
         setupWebView()
+        setupWebViewBridge()
+        setupNativeControls()
         loadVimeoPlayer()
     }
     
     open override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
+        networkMonitor?.startMonitoring()
     }
     
     open override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         navigationController?.setNavigationBarHidden(false, animated: animated)
         
-        // Stop video playback before cleanup
-        webView.evaluateJavaScript("pauseVideo()") { _, _ in
-            self.webView.evaluateJavaScript("cleanup()") { _, error in
-                if let error = error {
-                    print("[VimeoRestrictedPlayer] Error during cleanup: \(error)")
-                }
-            }
-        }
+        // Pause playback gracefully
+        webViewBridge?.pause { _, _ in }
     }
     
     open override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        pause()
+        networkMonitor?.stopMonitoring()
+        cleanup()
     }
     
-    // MARK: - UI Setup
+    // MARK: - Setup Methods
     
     private func setupUI() {
-        view.backgroundColor = configuration.theme.backgroundColor
+        view.backgroundColor = configuration.theme.colors.primaryBackground
         
+        // Add subviews
         view.addSubview(loadingIndicator)
+        view.addSubview(errorView)
+        
+        // Setup constraints
         NSLayoutConstraint.activate([
             loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            
+            errorView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            errorView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            errorView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            errorView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
         ])
         
         loadingIndicator.startAnimating()
@@ -151,17 +177,19 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         
-        let contentController = WKUserContentController()
-        contentController.add(self, name: "vimeoPlayerHandler")
-        config.userContentController = contentController
+        // Enhanced preferences for better video playback
+        config.preferences.javaScriptEnabled = true
+        config.preferences.javaScriptCanOpenWindowsAutomatically = false
         
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
-        webView.backgroundColor = configuration.theme.backgroundColor
+        webView.backgroundColor = configuration.theme.colors.primaryBackground
         webView.isOpaque = false
         webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
         
-        view.addSubview(webView)
+        view.insertSubview(webView, at: 0)
         
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -169,82 +197,139 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
         ])
+    }
+    
+    private func setupWebViewBridge() {
+        webViewBridge = VimeoPlayerWebViewBridge()
+        webViewBridge.delegate = self
+        webViewBridge.setupBridge(with: webView)
+    }
+    
+    private func setupNativeControls() {
+        guard showsNativeControls else { return }
         
-        setupBackButton()
+        nativeControls = VimeoPlayerControls()
+        nativeControls!.delegate = self
+        nativeControls!.theme = configuration.theme
+        nativeControls!.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(nativeControls!)
+        
+        NSLayoutConstraint.activate([
+            nativeControls!.topAnchor.constraint(equalTo: webView.topAnchor),
+            nativeControls!.leadingAnchor.constraint(equalTo: webView.leadingAnchor),
+            nativeControls!.trailingAnchor.constraint(equalTo: webView.trailingAnchor),
+            nativeControls!.bottomAnchor.constraint(equalTo: webView.bottomAnchor)
+        ])
+        
+        nativeControls!.setTitle(configuration.videoTitle)
     }
     
     private func setupBackButton() {
+        guard !showsNativeControls else { return } // Native controls handle back button
+        
         view.addSubview(backButton)
         backButton.isHidden = !showsBackButton
         
-        switch configuration.theme.backButtonPosition {
+        switch configuration.theme.controls.backButton.position {
         case .topLeft(let insets):
             NSLayoutConstraint.activate([
                 backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: insets.top),
                 backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: insets.left),
-                backButton.widthAnchor.constraint(equalToConstant: configuration.theme.backButtonSize.width),
-                backButton.heightAnchor.constraint(equalToConstant: configuration.theme.backButtonSize.height)
+                backButton.widthAnchor.constraint(equalToConstant: configuration.theme.controls.backButton.size.width),
+                backButton.heightAnchor.constraint(equalToConstant: configuration.theme.controls.backButton.size.height)
             ])
         case .topRight(let insets):
             NSLayoutConstraint.activate([
                 backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: insets.top),
                 backButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -insets.right),
-                backButton.widthAnchor.constraint(equalToConstant: configuration.theme.backButtonSize.width),
-                backButton.heightAnchor.constraint(equalToConstant: configuration.theme.backButtonSize.height)
+                backButton.widthAnchor.constraint(equalToConstant: configuration.theme.controls.backButton.size.width),
+                backButton.heightAnchor.constraint(equalToConstant: configuration.theme.controls.backButton.size.height)
             ])
         case .custom(let frame):
             backButton.frame = frame
         }
+        
+        updateBackButtonStyle()
     }
     
-    private func updateBackButtonStyle() {
-        switch backButtonStyle {
-        case .system:
-            backButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
-        case .custom(let image):
-            backButton.setImage(image, for: .normal)
+    private func setupNetworkMonitoring() {
+        networkMonitor = NetworkMonitor { [weak self] isConnected in
+            DispatchQueue.main.async {
+                self?.handleNetworkChange(isConnected: isConnected)
+            }
         }
     }
     
-    // MARK: - Actions
+    // MARK: - Configuration Updates
     
-    @objc private func backButtonTapped() {
-        pause()
+    private func updateConfiguration() {
+        htmlGenerator = VimeoHTMLGenerator(configuration: configuration)
         
-        let alert = UIAlertController(
-            title: configuration.localization.exitConfirmationTitle,
-            message: configuration.localization.exitConfirmationMessage,
-            preferredStyle: .alert
-        )
+        // Update UI elements
+        view.backgroundColor = configuration.theme.colors.primaryBackground
+        webView?.backgroundColor = configuration.theme.colors.primaryBackground
+        loadingIndicator.style = configuration.theme.loading.style
         
-        alert.addAction(UIAlertAction(title: configuration.localization.exitButtonTitle, style: .destructive) { _ in
-            self.delegate?.vimeoPlayer(self, didExitAtTime: self.currentWatchedDuration)
-            self.dismiss(animated: true)
-        })
+        // Update native controls
+        nativeControls?.theme = configuration.theme
+        nativeControls?.setTitle(configuration.videoTitle)
+        nativeControls?.allowsFullSeek = configuration.allowsFullSeek
         
-        alert.addAction(UIAlertAction(title: configuration.localization.cancelButtonTitle, style: .cancel))
+        // Update error view
+        errorView.theme = configuration.theme
         
-        present(alert, animated: true)
+        updateBackButtonStyle()
     }
     
-    // MARK: - Public Methods
+    private func updateControlsVisibility() {
+        if showsNativeControls && nativeControls == nil {
+            setupNativeControls()
+        } else if !showsNativeControls && nativeControls != nil {
+            nativeControls?.removeFromSuperview()
+            nativeControls = nil
+            setupBackButton()
+        }
+    }
+    
+    private func updateBackButtonVisibility() {
+        if showsNativeControls {
+            nativeControls?.backButton.isHidden = !showsBackButton
+        } else {
+            backButton.isHidden = !showsBackButton
+        }
+    }
+    
+    private func updateBackButtonStyle() {
+        let buttonToUpdate = showsNativeControls ? nativeControls?.backButton : backButton
+        guard let button = buttonToUpdate else { return }
+        
+        switch backButtonStyle {
+        case .system:
+            button.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        case .custom(let image):
+            button.setImage(image, for: .normal)
+        }
+        
+        configuration.theme.applyButtonStyle(to: button, style: configuration.theme.controls.backButton)
+    }
+    
+    // MARK: - Player Control Methods
     
     /// Play the video
     public func play() {
-        guard isVideoReady else { return }
-        webView.evaluateJavaScript("playVideo()") { _, error in
+        webViewBridge?.play { [weak self] success, error in
             if let error = error {
-                print("[VimeoRestrictedPlayer] Error playing video: \(error)")
+                self?.handleError(.playbackFailed(error.localizedDescription))
             }
         }
     }
     
     /// Pause the video
     public func pause() {
-        guard isVideoReady else { return }
-        webView.evaluateJavaScript("pauseVideo()") { _, error in
+        webViewBridge?.pause { [weak self] success, error in
             if let error = error {
-                print("[VimeoRestrictedPlayer] Error pausing video: \(error)")
+                print("[VimeoRestrictedPlayer] Error pausing: \(error)")
             }
         }
     }
@@ -252,23 +337,21 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
     /// Seek to specific time
     /// - Parameter time: Time to seek to in seconds
     public func seek(to time: TimeInterval) {
-        guard isVideoReady else { return }
         let seekTime = configuration.allowsFullSeek ? time : min(time, maxAllowedSeekPosition)
-        webView.evaluateJavaScript("setCurrentTime(\(seekTime))") { _, error in
+        webViewBridge?.seekTo(seekTime) { [weak self] success, error in
             if let error = error {
-                print("[VimeoRestrictedPlayer] Error seeking: \(error)")
+                self?.handleError(.playbackFailed(error.localizedDescription))
             }
         }
     }
     
     /// Restart video from beginning
     public func restart() {
-        guard isVideoReady else { return }
         maxAllowedSeekPosition = 0
         currentWatchedDuration = 0
-        webView.evaluateJavaScript("restartVideo()") { _, error in
+        webViewBridge?.restart { [weak self] success, error in
             if let error = error {
-                print("[VimeoRestrictedPlayer] Error restarting: \(error)")
+                self?.handleError(.playbackFailed(error.localizedDescription))
             }
         }
     }
@@ -277,7 +360,7 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
     /// - Parameter time: New maximum allowed seek time
     public func updateMaxAllowedSeekTime(_ time: TimeInterval) {
         maxAllowedSeekPosition = max(maxAllowedSeekPosition, time)
-        webView.evaluateJavaScript("updateMaxAllowedSeek(\(maxAllowedSeekPosition))") { _, error in
+        webViewBridge?.updateMaxAllowedSeek(maxAllowedSeekPosition) { [weak self] success, error in
             if let error = error {
                 print("[VimeoRestrictedPlayer] Error updating max seek: \(error)")
             }
@@ -289,30 +372,87 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         return state.isPlaying
     }
     
+    // MARK: - Error Handling
+    
+    private func handleError(_ error: VimeoPlayerError) {
+        state = .error(error)
+        
+        errorView.showError(error, canRetry: retryCount < maxRetryAttempts)
+        errorView.isHidden = false
+        loadingIndicator.stopAnimating()
+        
+        delegate?.vimeoPlayer(self, didEncounterError: error)
+    }
+    
+    private func retryLoad() {
+        guard retryCount < maxRetryAttempts else {
+            handleError(.unknown("Maximum retry attempts exceeded"))
+            return
+        }
+        
+        retryCount += 1
+        errorView.isHidden = true
+        loadingIndicator.startAnimating()
+        state = .loading
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.loadVimeoPlayer()
+        }
+    }
+    
+    private func handleNetworkChange(isConnected: Bool) {
+        if !isConnected && state == .loading {
+            handleError(.networkError(NetworkError.noConnection))
+        } else if isConnected && state.isError {
+            // Automatically retry if we regain connection
+            retryLoad()
+        }
+    }
+    
     // MARK: - Private Methods
     
     private func loadVimeoPlayer() {
+        guard VimeoURLParser.isValidVimeoURL(configuration.videoURL) else {
+            handleError(.invalidURL(configuration.videoURL))
+            return
+        }
+        
         let htmlContent = htmlGenerator.generateHTML()
         webView.loadHTMLString(htmlContent, baseURL: nil)
+    }
+    
+    private func cleanup() {
+        webViewBridge?.cleanup()
+        networkMonitor?.stopMonitoring()
+        nativeControls?.cancelAutoHide()
     }
     
     private func handleStateChange(from oldState: VimeoPlayerState, to newState: VimeoPlayerState) {
         switch newState {
         case .ready:
             loadingIndicator.stopAnimating()
+            errorView.isHidden = true
+            retryCount = 0
+            
         case .playing:
             delegate?.vimeoPlayerDidStartPlaying(self)
+            nativeControls?.isPlaying = true
+            
         case .paused:
             delegate?.vimeoPlayerDidPause(self)
+            nativeControls?.isPlaying = false
+            
         case .ended:
             delegate?.vimeoPlayer(self, didCompleteWithDuration: currentWatchedDuration)
+            nativeControls?.isPlaying = false
             if configuration.isCompleted {
                 showCompletionAlert()
             }
+            
         case .error(let error):
             loadingIndicator.stopAnimating()
             delegate?.vimeoPlayer(self, didEncounterError: error)
-            showErrorAlert(error: error)
+            
         default:
             break
         }
@@ -336,10 +476,8 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         )
         
         alert.addAction(UIAlertAction(title: configuration.resumeOptions.continueButtonTitle, style: .default) { _ in
-            self.webView.evaluateJavaScript("resumeFromBookmark()") { _, error in
-                if let error = error {
-                    print("[VimeoRestrictedPlayer] Error resuming: \(error)")
-                } else {
+            self.webViewBridge?.resumeFromBookmark { success, error in
+                if success {
                     self.delegate?.vimeoPlayer(self, didResumeFromTime: lastWatched)
                 }
             }
@@ -367,24 +505,6 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         present(alert, animated: true)
     }
     
-    private func showErrorAlert(error: VimeoPlayerError) {
-        let alert = UIAlertController(
-            title: configuration.localization.errorTitle,
-            message: error.localizedDescription,
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: configuration.localization.errorCancelButton, style: .cancel) { _ in
-            self.dismiss(animated: true)
-        })
-        
-        alert.addAction(UIAlertAction(title: configuration.localization.errorRetryButton, style: .default) { _ in
-            self.loadVimeoPlayer()
-        })
-        
-        present(alert, animated: true)
-    }
-    
     private func showSeekRestrictedAlert(attemptedTime: TimeInterval, maxAllowed: TimeInterval, wasPlaying: Bool) {
         let currentTime = Date().timeIntervalSince1970
         if currentTime - lastRestrictionAlertTime < 3.0 {
@@ -407,124 +527,146 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         )
         
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
-            self.webView.evaluateJavaScript("resumeVideoAfterAlert()") { _, _ in }
+            self.webViewBridge?.resumeVideoAfterAlert { _, _ in }
         })
         
         present(alert, animated: true)
-        
         delegate?.vimeoPlayer(self, didRestrictSeekFrom: attemptedTime, to: maxAllowed)
+    }
+    
+    // MARK: - Actions
+    
+    @objc private func backButtonTapped() {
+        pause()
+        
+        let alert = UIAlertController(
+            title: configuration.localization.exitConfirmationTitle,
+            message: configuration.localization.exitConfirmationMessage,
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: configuration.localization.exitButtonTitle, style: .destructive) { _ in
+            self.delegate?.vimeoPlayer(self, didExitAtTime: self.currentWatchedDuration)
+            self.dismiss(animated: true)
+        })
+        
+        alert.addAction(UIAlertAction(title: configuration.localization.cancelButtonTitle, style: .cancel))
+        
+        present(alert, animated: true)
     }
 }
 
-// MARK: - WKScriptMessageHandler
+// MARK: - VimeoPlayerWebViewBridgeDelegate
 
-extension VimeoRestrictedPlayerViewController: WKScriptMessageHandler {
+extension VimeoRestrictedPlayerViewController: VimeoPlayerWebViewBridgeDelegate {
     
-    public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let messageBody = message.body as? [String: Any],
-              let type = messageBody["type"] as? String else {
-            return
-        }
-        
-        switch type {
-        case "ready":
-            handleReadyMessage(messageBody)
-            
-        case "timeUpdate":
-            handleTimeUpdateMessage(messageBody)
-            
-        case "seekCompleted":
-            handleSeekCompletedMessage(messageBody)
-            
-        case "seekError":
-            handleSeekErrorMessage(messageBody)
-            
-        case "seekRestricted":
-            handleSeekRestrictedMessage(messageBody)
-            
-        case "play":
-            state = .playing
-            
-        case "pause":
-            state = .paused
-            
-        case "ended":
-            state = .ended
-            
-        case "error":
-            handleErrorMessage(messageBody)
-            
-        default:
-            print("[VimeoRestrictedPlayer] Unknown message type: \(type)")
-        }
-    }
-    
-    private func handleReadyMessage(_ message: [String: Any]) {
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didReceiveReady duration: TimeInterval, shouldShowResumeDialog: Bool) {
         isVideoReady = true
+        self.duration = duration
         state = .ready
         
-        if let videoDuration = message["duration"] as? TimeInterval {
-            duration = videoDuration
-            delegate?.vimeoPlayerDidBecomeReady(self, duration: videoDuration)
-        }
+        delegate?.vimeoPlayerDidBecomeReady(self, duration: duration)
         
-        if !configuration.isCompleted && configuration.resumeOptions.showResumeDialog {
-            if let shouldShowResumeDialog = message["shouldShowResumeDialog"] as? Bool,
-               shouldShowResumeDialog {
-                showResumeDialog()
-            }
-        }
-        
-        if let lastWatchedTime = message["lastWatchedTime"] as? TimeInterval,
-           let maxAllowed = message["maxAllowedSeek"] as? TimeInterval {
-            maxAllowedSeekPosition = maxAllowed
+        if !configuration.isCompleted && configuration.resumeOptions.showResumeDialog && shouldShowResumeDialog {
+            showResumeDialog()
         }
     }
     
-    private func handleTimeUpdateMessage(_ message: [String: Any]) {
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didUpdateTime currentTime: TimeInterval, maxAllowed: TimeInterval) {
         if !configuration.isCompleted {
-            if let time = message["currentTime"] as? TimeInterval {
-                currentTime = time
-                currentWatchedDuration = time
-                
-                if let maxAllowed = message["maxAllowed"] as? TimeInterval {
-                    maxAllowedSeekPosition = max(maxAllowedSeekPosition, maxAllowed)
-                }
-                
-                delegate?.vimeoPlayer(self, didUpdateProgress: time, totalDuration: duration)
-            }
+            self.currentTime = currentTime
+            self.currentWatchedDuration = currentTime
+            self.maxAllowedSeekPosition = max(maxAllowedSeekPosition, maxAllowed)
+            
+            // Update native controls
+            nativeControls?.updatePlaybackState(
+                isPlaying: state.isPlaying,
+                currentTime: currentTime,
+                duration: duration,
+                maxAllowedSeek: maxAllowedSeekPosition
+            )
+            
+            delegate?.vimeoPlayer(self, didUpdateProgress: currentTime, totalDuration: duration)
         }
     }
     
-    private func handleSeekCompletedMessage(_ message: [String: Any]) {
-        if let time = message["time"] as? TimeInterval {
-            isPendingSeek = false
-            currentTime = time
-            currentWatchedDuration = time
-        }
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didPlay: Void) {
+        state = .playing
     }
     
-    private func handleSeekErrorMessage(_ message: [String: Any]) {
-        if let errorMessage = message["error"] as? String {
-            print("[VimeoRestrictedPlayer] Seek error: \(errorMessage)")
-            isPendingSeek = false
-        }
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didPause: Void) {
+        state = .paused
     }
     
-    private func handleSeekRestrictedMessage(_ message: [String: Any]) {
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didEnd: Void) {
+        state = .ended
+    }
+    
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didRestrictSeek attemptedTime: TimeInterval, maxAllowed: TimeInterval, wasPlaying: Bool, actualPosition: TimeInterval) {
         if !configuration.isCompleted && configuration.seekRestriction.showAlertOnRestriction {
-            if let attemptedTime = message["attemptedTime"] as? TimeInterval,
-               let maxAllowed = message["maxAllowed"] as? TimeInterval {
-                let wasPlaying = message["wasPlaying"] as? Bool ?? false
-                showSeekRestrictedAlert(attemptedTime: attemptedTime, maxAllowed: maxAllowed, wasPlaying: wasPlaying)
-            }
+            showSeekRestrictedAlert(attemptedTime: attemptedTime, maxAllowed: maxAllowed, wasPlaying: wasPlaying)
         }
     }
     
-    private func handleErrorMessage(_ message: [String: Any]) {
-        if let errorMessage = message["error"] as? String {
-            state = .error(.playbackFailed(errorMessage))
-        }
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didCompleteSeek time: TimeInterval, wasRequested: TimeInterval, isPlaying: Bool) {
+        currentTime = time
+        currentWatchedDuration = time
+    }
+    
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didEncounterError error: VimeoPlayerError) {
+        handleError(error)
+    }
+    
+    public func bridge(_ bridge: VimeoPlayerWebViewBridge, didSeekError error: String, requestedTime: TimeInterval) {
+        print("[VimeoRestrictedPlayer] Seek error: \(error)")
+    }
+}
+
+// MARK: - VimeoPlayerControlsDelegate
+
+extension VimeoRestrictedPlayerViewController: VimeoPlayerControlsDelegate {
+    
+    public func controlsDidTapPlay() {
+        play()
+    }
+    
+    public func controlsDidTapPause() {
+        pause()
+    }
+    
+    public func controlsDidTapBack() {
+        backButtonTapped()
+    }
+    
+    public func controlsDidSeek(to time: TimeInterval) {
+        seek(to: time)
+    }
+    
+    public func controlsDidTapFullscreen() {
+        // Implement fullscreen functionality
+        // This would typically involve presenting the player modally or transitioning to landscape
+    }
+    
+    public func controlsDidChangeVolume(to level: Float) {
+        // Implement volume control if needed
+    }
+    
+    public func controlsDidToggleControlsVisibility(visible: Bool) {
+        // Handle controls visibility changes if needed
+    }
+}
+
+// MARK: - ErrorDisplayViewDelegate
+
+extension VimeoRestrictedPlayerViewController: ErrorDisplayViewDelegate {
+    
+    public func errorDisplayViewDidTapRetry(_ view: ErrorDisplayView) {
+        retryLoad()
+    }
+    
+    public func errorDisplayViewDidTapDismiss(_ view: ErrorDisplayView) {
+        delegate?.vimeoPlayer(self, didExitAtTime: currentWatchedDuration)
+        dismiss(animated: true)
     }
 }
 
@@ -533,10 +675,198 @@ extension VimeoRestrictedPlayerViewController: WKScriptMessageHandler {
 extension VimeoRestrictedPlayerViewController: WKNavigationDelegate {
     
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        state = .error(.loadingFailed(error))
+        handleError(.loadingFailed(error))
     }
     
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        state = .error(.networkError(error))
+        handleError(.networkError(error))
+    }
+    
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Web view has finished loading, but video player may not be ready yet
+        print("[VimeoRestrictedPlayer] WebView finished loading")
+    }
+}
+
+// MARK: - Supporting Classes
+
+/// Error display view for user-friendly error messages
+private class ErrorDisplayView: UIView {
+    
+    weak var delegate: ErrorDisplayViewDelegate?
+    var theme: VimeoPlayerTheme = .default {
+        didSet { applyTheme() }
+    }
+    
+    private let containerView = UIView()
+    private let iconImageView = UIImageView()
+    private let titleLabel = UILabel()
+    private let messageLabel = UILabel()
+    private let retryButton = UIButton(type: .system)
+    private let dismissButton = UIButton(type: .system)
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupUI()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupUI()
+    }
+    
+    convenience init(theme: VimeoPlayerTheme) {
+        self.init(frame: .zero)
+        self.theme = theme
+        applyTheme()
+    }
+    
+    private func setupUI() {
+        backgroundColor = theme.colors.primaryBackground
+        
+        // Setup container
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(containerView)
+        
+        // Setup icon
+        iconImageView.contentMode = .scaleAspectFit
+        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(iconImageView)
+        
+        // Setup labels
+        titleLabel.textAlignment = .center
+        titleLabel.numberOfLines = 0
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(titleLabel)
+        
+        messageLabel.textAlignment = .center
+        messageLabel.numberOfLines = 0
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(messageLabel)
+        
+        // Setup buttons
+        retryButton.setTitle("Retry", for: .normal)
+        retryButton.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(retryButton)
+        
+        dismissButton.setTitle("Dismiss", for: .normal)
+        dismissButton.addTarget(self, action: #selector(dismissTapped), for: .touchUpInside)
+        dismissButton.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(dismissButton)
+        
+        setupConstraints()
+        applyTheme()
+    }
+    
+    private func setupConstraints() {
+        NSLayoutConstraint.activate([
+            containerView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            containerView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            containerView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 32),
+            containerView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -32),
+            
+            iconImageView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            iconImageView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            iconImageView.widthAnchor.constraint(equalToConstant: 60),
+            iconImageView.heightAnchor.constraint(equalToConstant: 60),
+            
+            titleLabel.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            
+            messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            messageLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            messageLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            
+            retryButton.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 24),
+            retryButton.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            retryButton.heightAnchor.constraint(equalToConstant: 44),
+            retryButton.widthAnchor.constraint(equalToConstant: 120),
+            
+            dismissButton.topAnchor.constraint(equalTo: retryButton.bottomAnchor, constant: 8),
+            dismissButton.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            dismissButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            dismissButton.heightAnchor.constraint(equalToConstant: 44),
+            dismissButton.widthAnchor.constraint(equalToConstant: 120)
+        ])
+    }
+    
+    private func applyTheme() {
+        backgroundColor = theme.colors.primaryBackground
+        
+        titleLabel.font = theme.typography.titleFont
+        titleLabel.textColor = theme.colors.primaryText
+        
+        messageLabel.font = theme.typography.bodyFont
+        messageLabel.textColor = theme.colors.secondaryText
+        
+        retryButton.backgroundColor = theme.colors.accent
+        retryButton.setTitleColor(.white, for: .normal)
+        retryButton.layer.cornerRadius = 8
+        
+        dismissButton.setTitleColor(theme.colors.secondaryText, for: .normal)
+    }
+    
+    func showError(_ error: VimeoPlayerError, canRetry: Bool) {
+        iconImageView.image = UIImage(systemName: "exclamationmark.triangle")
+        iconImageView.tintColor = theme.colors.error
+        
+        titleLabel.text = "Playback Error"
+        messageLabel.text = error.localizedDescription
+        
+        retryButton.isHidden = !canRetry
+    }
+    
+    @objc private func retryTapped() {
+        delegate?.errorDisplayViewDidTapRetry(self)
+    }
+    
+    @objc private func dismissTapped() {
+        delegate?.errorDisplayViewDidTapDismiss(self)
+    }
+}
+
+protocol ErrorDisplayViewDelegate: AnyObject {
+    func errorDisplayViewDidTapRetry(_ view: ErrorDisplayView)
+    func errorDisplayViewDidTapDismiss(_ view: ErrorDisplayView)
+}
+
+/// Network monitoring utility
+private class NetworkMonitor {
+    private let callback: (Bool) -> Void
+    private var isMonitoring = false
+    
+    init(callback: @escaping (Bool) -> Void) {
+        self.callback = callback
+    }
+    
+    func startMonitoring() {
+        isMonitoring = true
+        // Implementation would use Network framework or Reachability
+        // For now, assume we're always connected
+        callback(true)
+    }
+    
+    func stopMonitoring() {
+        isMonitoring = false
+    }
+}
+
+/// Network error types
+enum NetworkError: LocalizedError {
+    case noConnection
+    case timeout
+    case serverError
+    
+    var errorDescription: String? {
+        switch self {
+        case .noConnection:
+            return "No internet connection available"
+        case .timeout:
+            return "Connection timed out"
+        case .serverError:
+            return "Server error occurred"
+        }
     }
 }
