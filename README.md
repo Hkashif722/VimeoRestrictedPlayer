@@ -636,32 +636,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Inspired by educational platform requirements
 - Thanks to all contributors and users
 
-## 📞 Support
-
-- 📧 **Email**: support@vimeoplayer.dev
-- 🐛 **Issues**: [GitHub Issues](https://github.com/yourusername/VimeoRestrictedPlayer/issues)
-- 📖 **Documentation**: [Full Documentation](https://vimeoplayer.dev/docs)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/yourusername/VimeoRestrictedPlayer/discussions)
-
-## 🗺️ Roadmap
-
-### Version 2.1 (Planned)
-- [ ] Picture-in-Picture support
-- [ ] AirPlay integration
-- [ ] Advanced analytics dashboard
-- [ ] React Native bindings
-
-### Version 2.2 (Planned)
-- [ ] Offline video support
-- [ ] Custom player skins
-- [ ] Advanced gesture controls
-- [ ] WebRTC live streaming
-
-### Version 3.0 (Future)
-- [ ] Multi-platform support (tvOS, watchOS)
-- [ ] AR/VR integration
-- [ ] AI-powered video recommendations
-- [ ] Advanced security features
 
 ---
 
