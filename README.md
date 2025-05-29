@@ -626,9 +626,6 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - Include unit tests for new features
 - Update documentation for public APIs
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
