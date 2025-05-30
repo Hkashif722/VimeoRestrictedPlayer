@@ -278,7 +278,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- 📧 Email: support@example.com
+- 📧 Email: kashifofficial451@gmail.com
 - 🐛 Issues: [GitHub Issues](https://github.com/yourusername/VimeoRestrictedPlayer/issues)
 - 📖 Documentation: [Full Documentation](https://github.com/yourusername/VimeoRestrictedPlayer/wiki)
 # VimeoRestrictedPlayer
