@@ -229,7 +229,7 @@ func testStateMachineInitialization() async throws {
 
 @Test("VimeoPlayerStateMachine - State transitions")
 func testStateMachineTransitions() async throws {
-    let stateMachine = VimeoPlayerStateMachine()
+    var stateMachine = VimeoPlayerStateMachine()
     
     // Test valid transition
     stateMachine.currentState.updateReadinessState(.ready)
@@ -525,7 +525,7 @@ func testMockDelegateCallbacks() async throws {
     
     // Simulate delegate calls
     let config = VimeoPlayerConfiguration(videoURL: "https://vimeo.com/123/abc")
-    let player = VimeoRestrictedPlayerViewController(configuration: config)
+    let player = await VimeoRestrictedPlayerViewController(configuration: config)
     
     delegate.vimeoPlayerDidBecomeReady(player, duration: 120)
     delegate.vimeoPlayerDidStartPlaying(player)
