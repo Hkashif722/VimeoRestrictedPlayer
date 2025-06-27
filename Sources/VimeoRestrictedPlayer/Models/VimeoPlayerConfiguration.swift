@@ -51,6 +51,9 @@ public struct VimeoPlayerConfiguration {
     /// Whether to autoplay the video
     public var autoplay: Bool
     
+    /// Whether to autoplay the video
+    public var referrer : String?
+    
     // MARK: - Initialization
     
     public init(
@@ -59,7 +62,8 @@ public struct VimeoPlayerConfiguration {
         lastWatchedDuration: TimeInterval = 0,
         isCompleted: Bool = false,
         allowsFullSeek: Bool = true,
-        videoID: String? = nil
+        videoID: String? = nil,
+        referrer: String? = nil
     ) {
         self.videoURL = videoURL
         self.videoTitle = videoTitle
@@ -67,6 +71,7 @@ public struct VimeoPlayerConfiguration {
         self.isCompleted = isCompleted
         self.allowsFullSeek = allowsFullSeek
         self.videoID = videoID
+        self.referrer = referrer
         
         // Set defaults
         self.theme = .default

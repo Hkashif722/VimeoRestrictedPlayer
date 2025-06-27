@@ -104,7 +104,7 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         super.viewDidLoad()
         setupUI()
         setupWebView()
-        loadVimeoPlayer()
+        loadVimeoPlayerWithCustomConfiguration()
     }
     
     open override func viewWillAppear(_ animated: Bool) {
@@ -296,6 +296,15 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         webView.loadHTMLString(htmlContent, baseURL: nil)
     }
     
+    private func loadVimeoPlayerWithCustomConfiguration() {
+        let htmlContent = htmlGenerator.generateHTML()
+        if let referrer = configuration.referrer,  let baseURL = URL(string: referrer) {
+            webView.loadHTMLString(htmlContent, baseURL: baseURL)
+        } else {
+            self.loadVimeoPlayer()
+        }
+    }
+    
     private func handleStateChange(from oldState: VimeoPlayerState, to newState: VimeoPlayerState) {
         switch newState {
         case .ready:
@@ -379,7 +388,7 @@ open class VimeoRestrictedPlayerViewController: UIViewController {
         })
         
         alert.addAction(UIAlertAction(title: configuration.localization.errorRetryButton, style: .default) { _ in
-            self.loadVimeoPlayer()
+            self.loadVimeoPlayerWithCustomConfiguration()
         })
         
         present(alert, animated: true)
