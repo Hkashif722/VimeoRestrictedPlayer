@@ -58,7 +58,8 @@ internal class VimeoHTMLGenerator {
               <iframe id="vimeo-player" 
                       src="https://player.vimeo.com/video/\(videoID)?h=\(hash)&autoplay=\(autoplay)&loop=false&title=true&byline=false&portrait=false&controls=true&playsinline=true&fullscreen=0"
                       frameborder="0" 
-                      allow="autoplay; picture-in-picture">
+                      allow="autoplay; picture-in-picture"
+                      referrerpolicy="strict-origin-when-cross-origin">
               </iframe>
             </div>
             
